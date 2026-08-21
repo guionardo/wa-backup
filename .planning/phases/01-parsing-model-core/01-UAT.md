@@ -79,6 +79,9 @@ blocked: 0
 ## Gaps
 
 - gap_id: G-01-4
+  status: resolved
+  resolved_by: 01-04-PLAN
+  resolved_at: 2026-08-21
   truth: "Multi-line messages are single rows whose embedded newline does not break the physical line structure of the CSV"
   status: failed
   reason: "User reported: yes, but this will be a invalid CSV. The line break character must be escaped"
@@ -94,6 +97,9 @@ blocked: 0
     - "Update tests that assert embedded real newlines in CSV text"
 
 - gap_id: G-01-7
+  status: resolved
+  resolved_by: 01-04-PLAN
+  resolved_at: 2026-08-21
   truth: "--verbose reaches the CLI through the documented start command and prints the format-detection report"
   status: failed
   reason: "User reported: npm run start --verbose --zip ... - npm intercepted --verbose (requires -- separator) and --zip is not a supported option; no report shown"
@@ -110,6 +116,9 @@ blocked: 0
     - "Show copy-paste usage examples in --help (npm run dev -- <zip> --verbose)"
 
 - gap_id: G-01-8
+  status: resolved
+  resolved_by: 01-04-PLAN
+  resolved_at: 2026-08-21
   truth: "--day-first/--month-first override flags reach the parser through the documented start command"
   status: failed
   reason: "User reported: npm warn Unknown cli config --day-first - flags never reach the program through npm run"

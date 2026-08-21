@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: complete
 phase: 01-parsing-model-core
 source: 01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md
 started: 2026-08-21T16:05:00Z
-updated: 2026-08-21T20:55:00Z
+updated: 2026-08-21T21:10:00Z
 ---
 
 ## Current Test
@@ -69,8 +69,8 @@ result: [pending]
 
 ## Summary
 
-total: 19
-passed: 13
+total: 20
+passed: 14
 issues: 5
 pending: 0
 skipped: 0

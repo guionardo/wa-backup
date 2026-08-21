@@ -11,7 +11,7 @@ Requirements for the initial CLI release. Each maps to a roadmap phase.
 
 - [x] **PARSE-01**: CLI accepts a path to a WhatsApp "Export chat" ZIP as its input argument
 - [x] **PARSE-02**: CLI extracts `_chat.txt` and media from the ZIP using streaming extraction (no full-archive buffering in memory)
-- [ ] **PARSE-03**: Parser detects the timestamp format per-file (day/month order, 12h/24h, `- / .` separators, optional brackets) and parses dates locale-tolerantly
+- [x] **PARSE-03**: Parser detects the timestamp format per-file (day/month order, 12h/24h, `- / .` separators, optional brackets) and parses dates locale-tolerantly
 - [x] **PARSE-04**: Parser handles multi-line message continuation (lines without a timestamp header append to the preceding message)
 - [x] **PARSE-05**: Parser preserves UTF-8 content including emoji, non-Latin scripts, and handles BOM / encoding variants
 - [x] **PARSE-06**: Parser distinguishes genuine message lines from non-message lines (avoids false-positive timestamp detection, e.g. macOS `._chat.txt` AppleDouble files)
@@ -80,7 +80,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 |-------------|-------|--------|
 | PARSE-01 | Phase 1 | Complete |
 | PARSE-02 | Phase 1 | Complete |
-| PARSE-03 | Phase 1 | Pending |
+| PARSE-03 | Phase 1 | Complete |
 | PARSE-04 | Phase 1 | Complete |
 | PARSE-05 | Phase 1 | Complete |
 | PARSE-06 | Phase 1 | Complete |

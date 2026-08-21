@@ -3,7 +3,7 @@ status: diagnosed
 phase: 01-parsing-model-core
 source: 01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md
 started: 2026-08-21T16:05:00Z
-updated: 2026-08-21T20:10:00Z
+updated: 2026-08-21T20:30:00Z
 ---
 
 ## Current Test
@@ -77,6 +77,21 @@ skipped: 0
 blocked: 0
 
 ## Gaps
+
+- gap_id: G-01-17
+  truth: "Output folder is the bare chat name (prefix stripped) and slugified for terminal use"
+  status: resolved
+  resolved_by: 01-06-PLAN
+  resolved_at: 2026-08-21
+  reason: "User reported: output folder should be only the chat name, without 'WhatsApp Chat - ' and slugified"
+  severity: minor
+  test: 17
+  root_cause: "chatNameFromZip returns the raw display name; no prefix strip or slugification exists"
+  artifacts:
+    - path: "src/extract.ts"
+      issue: "no slugify step"
+  missing:
+    - "slugifyChatName: strip ^WhatsApp Chat - , NFD-diacritics-free, lowercase, non-alphanum runs -> '-'"
 
 - gap_id: G-01-16
   truth: "Output subfolder is the chat name derived from the ZIP file name when the export keeps _chat.txt at the archive root"

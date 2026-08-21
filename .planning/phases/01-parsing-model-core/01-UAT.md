@@ -80,7 +80,9 @@ blocked: 0
 
 - gap_id: G-01-16
   truth: "Output subfolder is the chat name derived from the ZIP file name when the export keeps _chat.txt at the archive root"
-  status: failed
+  status: resolved
+  resolved_by: 01-05-PLAN
+  resolved_at: 2026-08-21
   reason: "User reported: file was saved into ./backup/chat/messages.csv - the output folder should be named as the chat name from the zip file name"
   severity: major
   test: 16

@@ -6,12 +6,12 @@ current_phase: 1
 current_phase_name: parsing-model-core
 status: executing
 stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-08-21T19:01:07.030Z"
+last_updated: "2026-08-21T19:15:11.241Z"
 progress:
   total_phases: 1
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # STATE.md
@@ -43,6 +43,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 
 ## Recent Activity
 
+- 2026-08-21: 01-05 gap closure complete — chat name from ZIP basename.
 - 2026-08-21: 01-04 gap closure complete — CSV escaping + CLI flag reachability.
 - 2026-08-21: Phase 1 VERIFIED — goal achieved, all gates green.
 - 2026-08-21: 01-03 complete — CSV merge/dedupe + authoritative integration suite.
@@ -64,6 +65,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 | Phase 01 P01-02 | 25m | 2 tasks | 5 files |
 | Phase 01 P01-03 | 20m | 2 tasks | 5 files |
 | Phase 01 P01-04 | 15m | 2 tasks | 4 files |
+| Phase 01 P01-05 | 10m | 1 tasks | 2 files |
 
 ## Decisions
 

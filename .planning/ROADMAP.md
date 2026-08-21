@@ -18,9 +18,11 @@ This roadmap delivers a TypeScript/Node CLI that turns a WhatsApp "Export chat" 
 4. Extraction and parsing stream line-by-line so memory stays constant (no full-archive buffering) even on a large chat with video media.
 
 **Requirements:** PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07
-**Plans:** 4/4 plans executed ✓ Verified 2026-08-21 (VERIFICATION.md)
+**Plans:** 5/5 plans executed ✓ Verified 2026-08-21 (VERIFICATION.md)
 
 Plans:
+
+- [x] 01-05-PLAN.md
 
 - [x] 01-04-PLAN.md
 

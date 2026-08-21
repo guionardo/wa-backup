@@ -1,0 +1,53 @@
+# Roadmap: WhatsApp Chat Backup
+
+## Overview
+This roadmap delivers a TypeScript/Node CLI that turns a WhatsApp "Export chat" ZIP (`_chat.txt` + media folders) into a self-contained, no-server backup of a single conversation — emitting three synchronized outputs (Markdown, WhatsApp-like HTML, structured JSON) with media reconciled and optionally inlined. The four phases proceed in dependency order: first the parsing core that produces an accurate, locale-tolerant normalized model; then the three-output renderers; then media reconciliation and inline embedding; finally the CLI surface and portable delivery. Together they satisfy all 19 v1 requirements and realize the core value — opening a full chat years later, text and media together, without WhatsApp, a phone, or an account.
+
+## Phases
+
+### Phase 1: Parsing & Model Core
+**Goal:** The CLI reads a WhatsApp export ZIP and produces a normalized, accurate in-memory message model regardless of locale, encoding, or file-system quirks — the foundation every other phase consumes.
+**Mode:** mvp
+**Success Criteria**:
+1. Running the tool with a ZIP path argument yields a parsed model with correct senders, timestamps, bodies, and media references for a real pt-BR sample chat.
+2. A locale-tolerant parser detects day/month order and 12h/24h format from header lines without manual configuration (with `--day-first`/`--month-first` override available).
+3. Multi-line messages are reconstructed as single messages; UTF-8 content (emoji, non-Latin scripts) is preserved with BOM/bidi handling; macOS `._*` AppleDouble artifacts are ignored and not mistaken for messages.
+4. Extraction and parsing stream line-by-line so memory stays constant (no full-archive buffering) even on a large chat with video media.
+**Requirements:** PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07
+
+### Phase 2: Multi-Format Rendering
+**Goal:** A parsed chat is rendered to three synchronized, portable outputs (JSON, Markdown, HTML) in a single run, with all content escaped against XSS.
+**Mode:** mvp
+**Success Criteria**:
+1. A single run emits JSON, Markdown, and HTML files that together represent the full parsed chat.
+2. The HTML renders messages as WhatsApp-like bubbles with deterministic per-sender colors, timestamps, and per-day dividers.
+3. All chat content (sender, body, URLs, filenames) is HTML-escaped so injected scripts do not execute when the file is opened in a browser; Markdown output is likewise treated as unsafe.
+4. `<Media omitted>` and deleted-message lines appear as visible placeholders in all three outputs.
+**Requirements:** OUT-01, OUT-02, OUT-03, OUT-04, OUT-05
+
+### Phase 3: Media Reconciliation & Embedding
+**Goal:** Media referenced in the transcript is located, copied, and optionally inlined so the backup is complete and self-contained.
+**Mode:** mvp
+**Success Criteria**:
+1. Media filenames from `_chat.txt` resolve to actual files in sibling media folders (case-insensitive, ignoring `(1)` and dash/space variance) and are copied into the output folder referenced by relative path.
+2. A `--inline` flag embeds resolved media as base64 into a single self-contained HTML file, respecting a per-file size cap (skipping oversized/video by default).
+3. Unresolved media references are reported without crashing the run, and the distinction between intentional `<Media omitted>` and missing-but-expected files is preserved.
+4. `<Media omitted>` and deleted-message placeholders remain visible in outputs alongside any reconciled media.
+**Requirements:** MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04
+
+### Phase 4: CLI & Portable Delivery
+**Goal:** The tool is a usable CLI that writes to a sensible default location, supports an explicit override, and produces a backup that opens with no server or backend.
+**Mode:** mvp
+**Success Criteria**:
+1. Output defaults to a folder named after the chat inside the current/output directory when no path is given.
+2. A `--out` flag redirects all generated outputs to a user-specified path.
+3. Opening any generated output (Markdown, HTML, or JSON) via `file://` works with no server, backend, or account required.
+**Requirements:** CLI-01, CLI-02, CLI-03
+
+## Phase Summary
+| # | Phase | Goal | Requirements | Success Criteria |
+|---|-------|------|--------------|------------------|
+| 1 | Parsing & Model Core | Read a WhatsApp export ZIP into a normalized, locale-tolerant message model | PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07 | 4 |
+| 2 | Multi-Format Rendering | Emit JSON + Markdown + WhatsApp-like HTML in one XSS-safe run | OUT-01, OUT-02, OUT-03, OUT-04, OUT-05 | 4 |
+| 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 |
+| 4 | CLI & Portable Delivery | Sensible default output, `--out` override, no-server portability | CLI-01, CLI-02, CLI-03 | 3 |

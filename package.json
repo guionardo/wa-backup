@@ -1,0 +1,28 @@
+{
+  "name": "wa-backup",
+  "version": "0.1.0",
+  "description": "WhatsApp chat export backup tool — streaming parser producing a CSV source-of-truth",
+  "type": "module",
+  "bin": {
+    "wa-backup": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "commander": "15.0.0",
+    "date-fns": "4.4.0",
+    "fflate": "0.8.3",
+    "picocolors": "1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "tsx": "4.23.12",
+    "tsup": "8.5.1",
+    "typescript": "^5"
+  }
+}

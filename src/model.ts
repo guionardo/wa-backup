@@ -1,8 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import pc from 'picocolors';
 import { extractChatTxt, chatNameFromZip } from './extract';
 import { parseMessages } from './parse/message';
 import { writeCsv } from './csv';
+import type { Detection } from './parse/timestamp';
 import type { Message } from './parse/types';
 
 export interface RunOptions {
@@ -12,9 +14,36 @@ export interface RunOptions {
   verbose?: boolean;
 }
 
+/** D-07 — transparency report for the detected file format. */
+export function verboseReport(
+  detection: Detection,
+  warnings: string[],
+  count: number,
+): void {
+  const order = detection.dayFirst ? 'DAY/MM (dd/mm)' : 'MM/DAY (mm/dd)';
+  // eslint-disable-next-line no-console
+  console.error(
+    pc.dim(`[wa-backup] format detection:`) +
+      `\n  order : ${pc.cyan(order)}${detection.overridden ? pc.yellow(' (CLI override)') : ''}` +
+      `\n  clock : ${pc.cyan(detection.is12h ? '12h (AM/PM)' : '24h')}` +
+      (detection.example ? `\n  sample: ${pc.dim(detection.example)}` : ''),
+  );
+  if (warnings.length) {
+    // eslint-disable-next-line no-console
+    console.error(
+      pc.yellow(`  warnings (${warnings.length}):`) +
+        '\n    ' +
+        warnings.slice(0, 10).join('\n    ') +
+        (warnings.length > 10 ? `\n    … and ${warnings.length - 10} more` : ''),
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.error(pc.dim(`  parsed: ${count} messages`));
+}
+
 /**
  * Orchestrate the full vertical path:
- *   extractChatTxt -> parseMessages -> writeCsv
+ *   extractChatTxt -> detectFormat -> parseMessages -> writeCsv
  * writes `${out}/<chat>/messages.csv` and returns the message count.
  */
 export async function runParser(
@@ -27,18 +56,28 @@ export async function runParser(
   await fs.mkdir(dir, { recursive: true });
 
   const lines = await extractChatTxt(zipPath);
+  const warnings: string[] = [];
+  let detection: Detection | undefined;
   const messages: Message[] = [];
-  for await (const m of parseMessages(lines, opts)) {
+  for await (const m of parseMessages(lines, {
+    dayFirst: opts.dayFirst,
+    monthFirst: opts.monthFirst,
+    warnings,
+    onDetection: (d) => {
+      detection = d;
+    },
+  })) {
     messages.push(m);
   }
 
   await writeCsv(path.join(dir, 'messages.csv'), messages);
 
   if (opts.verbose) {
-    // D-07: detection transparency (minimal tracer reporting).
-    // Full verbose locale report arrives in plan 02.
-    // eslint-disable-next-line no-console
-    console.error(`[wa-backup] chat=${chat} messages=${messages.length}`);
+    verboseReport(
+      detection ?? { dayFirst: Boolean(opts.dayFirst), is12h: false },
+      warnings,
+      messages.length,
+    );
   }
   return messages.length;
 }

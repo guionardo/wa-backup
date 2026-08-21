@@ -1,6 +1,12 @@
 import type { Message, MessageType } from './types';
-import { stripInvisible, trimInvisible, TS_RE, parseTimestamp } from './timestamp';
-import { readLines } from '../extract';
+import {
+  stripInvisible,
+  trimInvisible,
+  TS_RE,
+  detectFormat,
+  tryParseTimestamp,
+} from './timestamp';
+import type { Detection } from './timestamp';
 
 /** Sender separator (D-09): optional ` - ` wrapper, then `Name: body`.
  * The separator is `:` + whitespace, or `:` at end-of-line (empty-body
@@ -9,10 +15,13 @@ import { readLines } from '../extract';
 const SENDER_RE = /^(?:\s*-\s*)?(.+?):(?:\s|$)([\s\S]*)$/;
 /** `<attached: FILENAME>` media marker. */
 const ATTACHED_RE = /<attached:\s*([^>]+?)>/;
-/** `* omitted` / `<Media omitted>` style placeholders (MEDIA-04). */
-const OMITTED_RE = /<?(?:media|image|video|sticker|document|audio|gif)\s+omitted>/i;
-/** Deleted-message markers (pt-BR + EN). */
-const DELETED_MARKERS = ['Mensagem apagada', 'Message deleted', 'This message was deleted'];
+/** `<Media omitted>` / `image omitted` / `sticker omitted` /
+ *  `*.pdf • N páginas document omitted` — brackets are OPTIONAL because real
+ *  Android exports drop them (MEDIA-04). */
+const OMITTED_RE = /<?\s*(?:media|image|video|sticker|document|audio|gif)\s+omitted\s*>?/i;
+/** Deleted-message markers (pt-BR + EN), whole-body match (D-15). */
+const DELETED_RE =
+  /^(mensagem apagada|message deleted|this message was deleted)\.?$/i;
 
 function classifyFromFilename(filename: string): MessageType {
   const f = filename.toUpperCase();
@@ -20,34 +29,55 @@ function classifyFromFilename(filename: string): MessageType {
   if (f.includes('PHOTO') || f.includes('IMG')) return 'photo';
   if (f.includes('VIDEO')) return 'video';
   // No `audio` type exists in the locked 8; fallback to document (A1).
-  if (
-    f.includes('AUDIO') ||
-    f.includes('DOCUMENT') ||
-    f.endsWith('.PDF') ||
-    f.endsWith('.DOC') ||
-    f.endsWith('.DOCX')
-  ) {
-    return 'document';
-  }
   return 'document';
+}
+
+/**
+ * Type classification order (research §3.3):
+ * attached → omitted-marker → deleted-marker → system → text.
+ * `media` non-null means an `<attached:` marker was consumed.
+ */
+export function classifyType(
+  body: string,
+  media: string | null,
+  hasSender: boolean,
+): MessageType {
+  if (media) return classifyFromFilename(media);
+  const t = trimInvisible(body).trim();
+  if (OMITTED_RE.test(t)) return 'omitted';
+  if (DELETED_RE.test(t)) return 'deleted';
+  if (!hasSender) return 'system';
+  return 'text';
 }
 
 export interface ParseOptions {
   dayFirst?: boolean;
   monthFirst?: boolean;
+  /** Pre-computed file-level detection; skips in-stream sampling. */
+  detection?: Detection;
+  /** Collector for verbose warnings (D-07): invalid/out-of-range dates. */
+  warnings?: string[];
+  /** Called once the file-level format decision resolves (D-07 reporting). */
+  onDetection?: (d: Detection) => void;
 }
+
+/** Sample window for the in-stream format vote (PARSE-03). */
+const SAMPLE_LINES = 200;
 
 /**
  * Streaming line state-machine parser (RESEARCH §3).
  *
  * - Non-timestamp line => append to open message's `text` (continuation, PARSE-04).
- * - Timestamp that fails to parse (D-04/D-08) => treated as continuation.
+ * - Timestamp that fails to parse (invalid/out-of-range, D-04/D-08) => continuation
+ *   (+ optional warning collected into `opts.warnings`).
+ * - Format detection runs ONCE per file over a bounded sample of the first
+ *   lines (lazy buffered while streaming — single pass, PARSE-03).
  * - Empty-body timestamped line is HELD; if the next line is a same-author
  *   attachment it merges into ONE media row (no phantom empty row, §3.4).
  * - Each `<attached>` line is its own row; dedupe key (in plan 03) keeps
  *   same-second bursts distinct (D-16).
- * - author preserved RAW (incl. bidi wrappers, ~ prefix); body leading/trailing
- *   invisible runs trimmed only.
+ * - author preserved RAW (incl. bidi wrappers, ~ prefix); bodies invisible-
+ *   stripped and whitespace-trimmed.
  */
 export async function* parseMessages(
   lines: AsyncIterable<string>,
@@ -55,6 +85,9 @@ export async function* parseMessages(
 ): AsyncGenerator<Message> {
   let current: Message | null = null;
   let heldEmpty: Message | null = null;
+  let detection: Detection | undefined = opts.detection;
+  const buffer: string[] = [];
+  const warnings = opts.warnings;
 
   const appendContinuation = (line: string) => {
     const target = current ?? heldEmpty;
@@ -67,68 +100,51 @@ export async function* parseMessages(
     }
   };
 
-  for await (const line of lines) {
-    const stripped = stripInvisible(line);
+  const processLine = (raw: string) => {
+    const stripped = stripInvisible(raw);
     const tsMatch = TS_RE.exec(stripped);
 
     if (!tsMatch) {
-      appendContinuation(line);
-      continue;
+      appendContinuation(raw);
+      return;
     }
 
-    const parsed = parseTimestamp(stripped, opts);
+    const parsed = tryParseTimestamp(stripped, detection!, warnings);
     if (!parsed) {
-      // D-04 / D-08: a line that matched the shape but not the date => continuation.
-      appendContinuation(line);
-      continue;
+      // D-04 / D-08: matched the shape but not a usable date => continuation.
+      appendContinuation(raw);
+      return;
     }
 
     const afterTs = stripped.slice(tsMatch[0].length);
     const senderMatch = SENDER_RE.exec(afterTs);
-    let author = '';
-    let body = afterTs;
-    let type: MessageType = 'text';
-
-    if (senderMatch) {
-      author = senderMatch[1].trim();
-      body = senderMatch[2];
-    } else {
-      type = 'system';
-    }
-
+    const author = senderMatch ? senderMatch[1].trim() : '';
+    let body = senderMatch ? senderMatch[2] : afterTs;
     body = trimInvisible(body).trim();
+
+    const attached = body.match(ATTACHED_RE);
+    const media = attached ? attached[1].trim() : null;
+    const text = media ? trimInvisible(body.replace(ATTACHED_RE, '')).trim() : body;
+    const type = classifyType(body, media, Boolean(senderMatch));
 
     const msg: Message = {
       timestamp_iso: parsed.iso,
       type,
       author,
-      text: body,
-      media: '',
+      text,
+      media: media ?? '',
     };
-
-    const attached = body.match(ATTACHED_RE);
-    if (attached) {
-      msg.media = attached[1].trim();
-      msg.text = trimInvisible(body.replace(ATTACHED_RE, '')).trim();
-      msg.type = classifyFromFilename(msg.media);
-    } else if (OMITTED_RE.test(msg.text)) {
-      msg.type = 'omitted';
-    } else if (DELETED_MARKERS.includes(msg.text.trim())) {
-      msg.type = 'deleted';
-    } else if (msg.type !== 'system') {
-      msg.type = 'text';
-    }
 
     // Merge held-empty with an incoming same-author attachment (§3.4).
     if (heldEmpty && msg.media && msg.author === heldEmpty.author) {
       heldEmpty = null; // discard empty holder; msg becomes the merged media row
     } else if (heldEmpty) {
-      yield heldEmpty;
+      emit(heldEmpty);
       heldEmpty = null;
     }
 
     if (current) {
-      yield current;
+      emit(current);
       current = null;
     }
 
@@ -137,8 +153,36 @@ export async function* parseMessages(
     } else {
       current = msg;
     }
+  };
+
+  // Emitting inside a generator via callback closure.
+  let queue: Message[] = [];
+  function emit(m: Message) {
+    queue.push(m);
   }
 
-  if (heldEmpty) yield heldEmpty;
-  if (current) yield current;
+  for await (const raw of lines) {
+    if (!detection) {
+      buffer.push(raw);
+      if (buffer.length >= SAMPLE_LINES) {
+        detection = detectFormat(buffer, opts);
+        opts.onDetection?.(detection);
+        for (const l of buffer) processLine(l);
+        buffer.length = 0;
+      }
+    } else {
+      processLine(raw);
+    }
+    while (queue.length) yield queue.shift() as Message;
+  }
+
+  if (!detection && buffer.length) {
+    detection = detectFormat(buffer, opts);
+    opts.onDetection?.(detection);
+    for (const l of buffer) processLine(l);
+    buffer.length = 0;
+  }
+  if (heldEmpty) emit(heldEmpty);
+  if (current) emit(current);
+  while (queue.length) yield queue.shift() as Message;
 }

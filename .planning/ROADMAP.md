@@ -18,13 +18,13 @@ This roadmap delivers a TypeScript/Node CLI that turns a WhatsApp "Export chat" 
 4. Extraction and parsing stream line-by-line so memory stays constant (no full-archive buffering) even on a large chat with video media.
 
 **Requirements:** PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
 
 - [x] 01-01-PLAN.md — Streaming extract + parse a real export into CSV (tracer): bootstrap (ESM/tsconfig/deps), fflate Unzip (AppleDouble skip), timestamp/message parsing, RFC-4180 UTF-8-no-BOM CSV write, commander CLI
 - [x] 01-02-PLAN.md — Harden locale detection (day/month majority vote, 12h/24h, separators, 2-digit year, sanity window, invalid→continuation) + omitted/deleted/system type classification + `--verbose`
-- [ ] 01-03-PLAN.md — CSV incremental append/dedupe/stable sort (D-16/D-17) + full end-to-end verification on both real samples
+- [x] 01-03-PLAN.md — CSV incremental append/dedupe/stable sort (D-16/D-17) + full end-to-end verification on both real samples
 
 ### Phase 2: Multi-Format Rendering
 

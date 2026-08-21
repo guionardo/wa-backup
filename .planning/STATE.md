@@ -6,12 +6,12 @@ current_phase: 1
 current_phase_name: parsing-model-core
 status: executing
 stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-08-21T15:38:48.817Z"
+last_updated: "2026-08-21T15:43:49.893Z"
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # STATE.md
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
-| 1 | ◆ In Progress | 2/3 | 67% |
+| 1 | ✓ Complete | 3/3 | 100% |
 | 2 | ○ Pending | 0/0 | 0% |
 | 3 | ○ Pending | 0/0 | 0% |
 | 4 | ○ Pending | 0/0 | 0% |
@@ -34,7 +34,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 ## Current Position
 
 **Phase:** 1 of 4 — parsing-model-core
-**Plan:** 3 of 3 (01-03 next)
+**Plan:** all complete (3/3)
 **Status:** Ready to execute
 
 ## Active Feature
@@ -43,6 +43,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 
 ## Recent Activity
 
+- 2026-08-21: 01-03 complete — CSV merge/dedupe + authoritative integration suite.
 - 2026-08-21: 01-02 complete — locale detection + type classification.
 - 2026-08-21: 01-01 complete — streaming tracer parser + real-sample integration tests.
 - 2026-08-21: Project initialized; requirements defined; roadmap created.
@@ -59,9 +60,11 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 |------|----------|-------|-------|
 | Phase 01 P01-01 | 45m | 2 tasks | 12 files |
 | Phase 01 P01-02 | 25m | 2 tasks | 5 files |
+| Phase 01 P01-03 | 20m | 2 tasks | 5 files |
 
 ## Decisions
 
 - [Phase 01]: extractChatTxt returns AsyncIterable<string> — Node 26 readline for-await hang workaround
 - [Phase 01]: SENDER_RE separator `:` + whitespace or EOL — empty-body lines merge, URLs safe
 - [Phase ?]: Omitted-marker brackets optional (Android drops them); detection is lazy in-stream single pass
+- [Phase ?]: runParser returns added-count; CSV merge is the incremental source-of-truth mechanism (D-13/D-16/D-17)

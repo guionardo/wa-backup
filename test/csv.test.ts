@@ -1,0 +1,92 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  dedupeKey,
+  mergeCsv,
+  readCsv,
+  writeCsv,
+} from '../src/csv';
+import type { Message } from '../src/parse/types';
+
+function msg(
+  timestamp_iso: string,
+  type: Message['type'],
+  author: string,
+  text: string,
+  media = '',
+): Message {
+  return { timestamp_iso, type, author, text, media };
+}
+
+function tmpCsv(): string {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wa-csv-')), 'messages.csv');
+}
+
+test('dedupeKey joins with 0x1F — field collisions impossible', () => {
+  const a = msg('2026-01-01T00:00:00', 'text', 'A,B', 'C');
+  const b = msg('2026-01-01T00:00:00', 'text', 'A', 'B,C');
+  assert.notEqual(dedupeKey(a), dedupeKey(b));
+});
+
+test('mergeCsv same messages twice => no duplicates (D-16)', async () => {
+  const file = tmpCsv();
+  const rows = [
+    msg('2026-07-23T09:47:18', 'text', 'A', 'hello'),
+    msg('2026-07-23T09:47:19', 'photo', 'A', '', 'x.jpg'),
+  ];
+  await writeCsv(file, rows);
+  const added = await mergeCsv(file, rows);
+  assert.equal(added, 0);
+  assert.equal(readCsv(file).length, 2);
+});
+
+test('mergeCsv adds only new rows; duplicate skipped', async () => {
+  const file = tmpCsv();
+  const existing = [msg('2026-07-23T10:00:00', 'text', 'A', 'one')];
+  await writeCsv(file, existing);
+
+  const added = await mergeCsv(file, [
+    msg('2026-07-23T11:00:00', 'text', 'B', 'two'),
+    msg('2026-07-23T12:00:00', 'text', 'C', 'three'),
+    msg('2026-07-23T13:00:00', 'text', 'D', 'four'),
+    msg('2026-07-23T10:00:00', 'text', 'A', 'one'), // duplicate
+  ]);
+
+  assert.equal(added, 3);
+  const all = readCsv(file);
+  assert.equal(all.length, 4);
+});
+
+test('mergeCsv sorts ascending; equal timestamps keep insertion order (D-17)', async () => {
+  const file = tmpCsv();
+  await writeCsv(file, [
+    msg('2026-07-24T10:41:10', 'photo', 'A', '', 'first.jpg'),
+    msg('2026-07-24T10:41:10', 'photo', 'A', '', 'second.jpg'),
+    msg('2026-07-24T09:00:00', 'text', 'B', 'earlier'),
+  ]);
+  await mergeCsv(file, [msg('2026-07-24T08:00:00', 'text', 'C', 'earliest')]);
+
+  const all = readCsv(file);
+  assert.deepEqual(
+    all.map((m) => m.timestamp_iso),
+    [
+      '2026-07-24T08:00:00',
+      '2026-07-24T09:00:00',
+      '2026-07-24T10:41:10',
+      '2026-07-24T10:41:10',
+    ],
+  );
+  assert.equal(all[2].media, 'first.jpg');
+  assert.equal(all[3].media, 'second.jpg');
+});
+
+test('merged file keeps header + no BOM (D-19)', async () => {
+  const file = tmpCsv();
+  await mergeCsv(file, [msg('2026-01-01T00:00:00', 'text', 'A', 'x')]);
+  const raw = fs.readFileSync(file);
+  assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media');
+  assert.equal(raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
+});

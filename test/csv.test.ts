@@ -90,3 +90,30 @@ test('merged file keeps header + no BOM (D-19)', async () => {
   assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media');
   assert.equal(raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
 });
+
+test('G-01-4: CR/LF escaped — one physical line per row, lossless round-trip', async () => {
+  const file = tmpCsv();
+  const rows = [
+    msg('2026-07-23T14:56:14', 'text', 'A', 'Rede: X\nSenha: Y'),
+    msg('2026-07-23T15:00:00', 'text', 'B', 'back\\slash and\nnewline'),
+    msg('2026-07-23T16:00:00', 'text', 'C', 'tricky \\n literal'),
+  ];
+  await writeCsv(file, rows);
+
+  // One physical line per row + header (trailing \n on last row).
+  const raw = fs.readFileSync(file, 'utf8');
+  assert.equal(raw.split('\n').length - 1, rows.length + 1);
+
+  // Round-trip: readCsv restores the exact original strings.
+  const back = readCsv(file);
+  assert.deepEqual(back, rows);
+});
+
+test('G-01-4: merge re-write keeps escaping stable (write->read->write)', async () => {
+  const file = tmpCsv();
+  await writeCsv(file, [msg('2026-01-01T00:00:00', 'text', 'A', 'x\ny')]);
+  await mergeCsv(file, [msg('2026-01-02T00:00:00', 'text', 'B', 'p\\q')]);
+  const back = readCsv(file);
+  assert.equal(back[0].text, 'x\ny');
+  assert.equal(back[1].text, 'p\\q');
+});

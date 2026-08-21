@@ -155,6 +155,19 @@ test('Plataforma WK: core rows extracted correctly', async () => {
   const contRow = records.find((r) => r[3].includes('Senha: TIMEWK2026'));
   assert.ok(contRow, 'continuation row exists');
   assert.ok(contRow![3].includes('Rede: Conexão WK - Staff'), 'joined with \\n');
+  // G-01-4: embedded newline is ESCAPED — every row stays ONE physical line.
+  assert.ok(
+    contRow![3].includes('Rede: Conexão WK - Staff\\nSenha: TIMEWK2026'),
+    'newline written as literal \\n escape',
+  );
+  for (const r of records) {
+    for (const f of r) {
+      assert.ok(
+        !f.includes('\n') && !f.includes('\r'),
+        `raw line break leaked into field: ${JSON.stringify(f.slice(0, 40))}`,
+      );
+    }
+  }
   assert.ok(!records.some((r) => r[3] === 'Senha: TIMEWK2026'), 'no separate Senha row');
 
   // Raw bidi author preserved verbatim.

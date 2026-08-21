@@ -1,10 +1,35 @@
 import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import type { Message } from './parse/types';
 
-/** RFC-4180 field quoting — double inner quotes, wrap when needed. */
+/**
+ * Escape a field so EVERY row occupies exactly ONE physical line (G-01-4):
+ * backslash -> `\\` first, then CR/LF -> literal `\n` / `\r`. RFC-4180 quoting
+ * then only needs to handle quotes and commas.
+ */
 export function csvField(s: string): string {
-  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-  return s;
+  const escaped = s
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+  if (/[",]/.test(escaped)) return '"' + escaped.replace(/"/g, '""') + '"';
+  return escaped;
+}
+
+/** Exact inverse of `csvField`'s escaping (single left-to-right pass so
+ * `\\n` never double-unescapes). Applied after RFC-4180 field parsing. */
+function unescapeField(s: string): string {
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      const c = s[i + 1];
+      if (c === 'n') { out += '\n'; i++; continue; }
+      if (c === 'r') { out += '\r'; i++; continue; }
+      if (c === '\\') { out += '\\'; i++; continue; }
+    }
+    out += s[i];
+  }
+  return out;
 }
 
 export function csvRow(m: Message): string {
@@ -73,11 +98,11 @@ export function readCsv(path: string): Message[] {
   for (const rec of records.slice(1)) {
     if (rec.length < 5) continue;
     out.push({
-      timestamp_iso: rec[0],
+      timestamp_iso: unescapeField(rec[0]),
       type: rec[1] as Message['type'],
-      author: rec[2],
-      text: rec[3],
-      media: rec[4],
+      author: unescapeField(rec[2]),
+      text: unescapeField(rec[3]),
+      media: unescapeField(rec[4]),
     });
   }
   return out;

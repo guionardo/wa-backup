@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
+import { slugifyChatName } from '../src/extract';
 
 const ROOT = process.cwd();
 const CHAT = 'WhatsApp Chat - Notas pessoais';
@@ -46,7 +47,7 @@ function parseCsv(text: string): string[][] {
 async function loadRecords(): Promise<string[][]> {
   const { zipPath, out } = parseSample() as unknown as { zipPath: string; out: string };
   await runParser(zipPath, { out });
-  return parseCsv(fs.readFileSync(path.join(out, CHAT, 'messages.csv'), 'utf8')).slice(1);
+  return parseCsv(fs.readFileSync(path.join(out, slugifyChatName(CHAT), 'messages.csv'), 'utf8')).slice(1);
 }
 
 test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {

@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
+import { slugifyChatName } from '../src/extract';
 
 const ROOT = process.cwd();
 const SAMPLES = [
@@ -61,7 +62,7 @@ async function parseSample(chat: string): Promise<string[][]> {
   const zip = buildZip(chat);
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-out-'));
   await runParser(zip, { out });
-  return parseCsv(fs.readFileSync(path.join(out, chat, 'messages.csv'), 'utf8'));
+  return parseCsv(fs.readFileSync(path.join(out, slugifyChatName(chat), 'messages.csv'), 'utf8'));
 }
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
@@ -71,7 +72,7 @@ test('Plataforma WK: header + no BOM + ISO timestamps', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-out-'));
   await runParser(zip, { out });
 
-  const csvPath = path.join(out, SAMPLES[0], 'messages.csv');
+  const csvPath = path.join(out, slugifyChatName(SAMPLES[0]), 'messages.csv');
   const raw = fs.readFileSync(csvPath);
   assert.equal(
     raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])),

@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
+import { slugifyChatName } from '../src/extract';
 
 const ROOT = process.cwd();
 const WK = 'WhatsApp Chat - Plataforma WK';
@@ -42,12 +43,16 @@ async function run(chat: string, out: string): Promise<string[][]> {
   fs.writeFileSync(zipPath, Buffer.from(zipped));
   await runParser(zipPath, { out });
   return parseCsv(
-    fs.readFileSync(path.join(out, chat, 'messages.csv'), 'utf8'),
+    fs.readFileSync(path.join(out, slugifyChatName(chat), 'messages.csv'), 'utf8'),
   ).slice(1);
 }
 
+function csvPathFor(out: string, chat: string): string {
+  return path.join(out, slugifyChatName(chat), 'messages.csv');
+}
+
 function assertNoBom(out: string, chat: string) {
-  const raw = fs.readFileSync(path.join(out, chat, 'messages.csv'));
+  const raw = fs.readFileSync(csvPathFor(out, chat));
   assert.equal(raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
   assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media');
 }
@@ -117,7 +122,7 @@ test('Notas pessoais: authoritative end-to-end assertions', async () => {
 test('dedupe on re-run: second run adds 0 rows, count unchanged (D-16)', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-int-dup-'));
   const first = await run(WK, out);
-  const csvPath = path.join(out, WK, 'messages.csv');
+  const csvPath = csvPathFor(out, WK);
   const countAfterFirst = parseCsv(fs.readFileSync(csvPath, 'utf8')).length - 1;
   assert.equal(first.length, countAfterFirst);
 
@@ -175,7 +180,7 @@ test('G-01-16: root-level _chat.txt derives chat name from ZIP basename', async 
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-root-out-'));
   await runParser(zipPath, { out });
 
-  const csvPath = path.join(out, 'WhatsApp Chat - Root Level', 'messages.csv');
+  const csvPath = path.join(out, 'root-level', 'messages.csv');
   assert.ok(fs.existsSync(csvPath), `expected CSV at ${csvPath}`);
   const records = parseCsv(fs.readFileSync(csvPath, 'utf8')).slice(1);
   assert.ok(records.length > 0);

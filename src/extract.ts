@@ -110,6 +110,22 @@ export function readLines(rl: readline.Interface): AsyncIterable<string> {
 }
 
 /**
+ * Terminal-friendly folder name (G-01-17): exports are always
+ * "WhatsApp Chat - <name>.zip", so strip the prefix and slugify —
+ * diacritics removed, lowercase, non-alphanumeric runs collapsed to `-`.
+ * `WhatsApp Chat - Plataforma WK` -> `plataforma-wk`.
+ */
+export function slugifyChatName(name: string): string {
+  return name
+    .replace(/^whatsapp chat\s*-\s*/i, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
  * Open the ZIP, read ONLY entry names (never inflate), and return the chat's
  * top-level folder name (e.g. `WhatsApp Chat - Plataforma WK`) sanitized for
  * safe use as a directory name (strips `/` and `..`, T-01-01).
@@ -147,6 +163,6 @@ export async function chatNameFromZip(zipPath: string): Promise<string> {
     parts.length > 1
       ? parts[0]
       : path.basename(zipPath).replace(/\.zip$/i, '');
-  const safe = raw.replace(/\.\.+/g, '').replace(/\//g, '_').trim();
-  return safe || 'chat';
+  const slug = slugifyChatName(raw);
+  return slug || 'chat';
 }

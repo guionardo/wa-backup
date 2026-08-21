@@ -9,13 +9,13 @@ Requirements for the initial CLI release. Each maps to a roadmap phase.
 
 ### Parsing
 
-- [ ] **PARSE-01**: CLI accepts a path to a WhatsApp "Export chat" ZIP as its input argument
-- [ ] **PARSE-02**: CLI extracts `_chat.txt` and media from the ZIP using streaming extraction (no full-archive buffering in memory)
+- [x] **PARSE-01**: CLI accepts a path to a WhatsApp "Export chat" ZIP as its input argument
+- [x] **PARSE-02**: CLI extracts `_chat.txt` and media from the ZIP using streaming extraction (no full-archive buffering in memory)
 - [ ] **PARSE-03**: Parser detects the timestamp format per-file (day/month order, 12h/24h, `- / .` separators, optional brackets) and parses dates locale-tolerantly
-- [ ] **PARSE-04**: Parser handles multi-line message continuation (lines without a timestamp header append to the preceding message)
-- [ ] **PARSE-05**: Parser preserves UTF-8 content including emoji, non-Latin scripts, and handles BOM / encoding variants
-- [ ] **PARSE-06**: Parser distinguishes genuine message lines from non-message lines (avoids false-positive timestamp detection, e.g. macOS `._chat.txt` AppleDouble files)
-- [ ] **PARSE-07**: Parser builds a normalized message model (sender, timestamp, body, media reference, message type)
+- [x] **PARSE-04**: Parser handles multi-line message continuation (lines without a timestamp header append to the preceding message)
+- [x] **PARSE-05**: Parser preserves UTF-8 content including emoji, non-Latin scripts, and handles BOM / encoding variants
+- [x] **PARSE-06**: Parser distinguishes genuine message lines from non-message lines (avoids false-positive timestamp detection, e.g. macOS `._chat.txt` AppleDouble files)
+- [x] **PARSE-07**: Parser builds a normalized message model (sender, timestamp, body, media reference, message type)
 
 ### Output
 
@@ -78,13 +78,13 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PARSE-01 | Phase 1 | Pending |
-| PARSE-02 | Phase 1 | Pending |
+| PARSE-01 | Phase 1 | Complete |
+| PARSE-02 | Phase 1 | Complete |
 | PARSE-03 | Phase 1 | Pending |
-| PARSE-04 | Phase 1 | Pending |
-| PARSE-05 | Phase 1 | Pending |
-| PARSE-06 | Phase 1 | Pending |
-| PARSE-07 | Phase 1 | Pending |
+| PARSE-04 | Phase 1 | Complete |
+| PARSE-05 | Phase 1 | Complete |
+| PARSE-06 | Phase 1 | Complete |
+| PARSE-07 | Phase 1 | Complete |
 | OUT-01 | Phase 2 | Pending |
 | OUT-02 | Phase 2 | Pending |
 | OUT-03 | Phase 2 | Pending |
@@ -99,6 +99,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | CLI-03 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 19 total
 - Mapped to phases: 19
 - Unmapped: 0 ✓

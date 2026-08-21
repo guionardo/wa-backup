@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 01-parsing-model-core
 source: 01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md
 started: 2026-08-21T16:05:00Z
-updated: 2026-08-21T19:05:00Z
+updated: 2026-08-21T20:10:00Z
 ---
 
 ## Current Test
@@ -69,14 +69,27 @@ result: [pending]
 
 ## Summary
 
-total: 12
-passed: 9
-issues: 3
+total: 16
+passed: 12
+issues: 4
 pending: 0
 skipped: 0
 blocked: 0
 
 ## Gaps
+
+- gap_id: G-01-16
+  truth: "Output subfolder is the chat name derived from the ZIP file name when the export keeps _chat.txt at the archive root"
+  status: failed
+  reason: "User reported: file was saved into ./backup/chat/messages.csv - the output folder should be named as the chat name from the zip file name"
+  severity: major
+  test: 16
+  root_cause: "chatNameFromZip only reads the top-level FOLDER inside the zip; real WhatsApp exports place _chat.txt at the archive ROOT (no folder), so the fallback chain ends at the generic 'chat'"
+  artifacts:
+    - path: "src/extract.ts"
+      issue: "fallback ignores the zip file basename; returns 'chat' for root-level _chat.txt"
+  missing:
+    - "When _chat.txt has no top-level folder, derive the chat name from the ZIP file basename (strip .zip), sanitized"
 
 - gap_id: G-01-4
   status: resolved

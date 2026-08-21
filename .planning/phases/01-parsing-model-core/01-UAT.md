@@ -27,9 +27,9 @@ result: pass
 
 ### 4. Multi-line Message Joined
 expected: The WiFi credentials message appears as ONE row containing both "Rede: Conexão WK - Staff" and "Senha: TIMEWK2026" joined by a newline — no separate row for the Senha line.
-result: issue
-reported: "yes, but this will be a invalid CSV. The line break character must be escaped"
-severity: major
+result: pass
+resolved_by: 01-04-PLAN (newline escaped; retested as test 13)
+note: original issue "yes, but this will be a invalid CSV. The line break character must be escaped"
 
 ### 5. No Phantom Empty Rows
 expected: Where WhatsApp emitted an empty message immediately followed by an attachment (lines 36-37), the CSV has ONE photo row — no empty-text row right before it.
@@ -41,15 +41,15 @@ result: pass
 
 ### 7. Locale Auto-detection Report
 expected: Running with `--verbose` prints a detection report: order DAY/MM, clock 24h, and a sample timestamp — no manual configuration needed.
-result: issue
-reported: "npm run start --verbose --zip ... -> npm swallowed --verbose (needs -- separator), and --zip is not a known option; no detection report printed"
-severity: major
+result: pass
+resolved_by: 01-04-PLAN (--zip alias + help examples; retested as test 14)
+note: original issue "npm run start --verbose --zip ... -> npm swallowed --verbose"
 
 ### 8. Day/month Override Flags
 expected: `--month-first` swaps ambiguous-date interpretation (report shows MM/DAY); `--day-first` forces back to DAY/MM.
-result: issue
-reported: "npm warn Unknown cli config \"--day-first\" ... - flags never reach the program through npm run"
-severity: major
+result: pass
+resolved_by: 01-04-PLAN (flag-safe help; retested as test 15)
+note: original issue "npm warn Unknown cli config --day-first - flags never reach the program"
 
 ### 9. Omitted / Deleted / System Types
 expected: "sticker omitted"/"image omitted"/"document omitted" rows have type=omitted with marker text kept; "Mensagem apagada" rows have type=deleted; group-event lines ("X added Y") keep their sender as author.
@@ -65,7 +65,7 @@ result: pass
 
 ### 12. Raw Author Strings Preserved
 expected: Authors are byte-for-byte what WhatsApp exported — phone-number authors keep their invisible bidi wrappers, nicknames keep the "~ " prefix.
-result: [pending]
+result: pass
 
 ## Summary
 

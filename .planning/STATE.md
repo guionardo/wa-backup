@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
-| 1 | ✓ Complete | 3/3 | 100% |
+| 1 | ✓ Complete | 7/7 | 100% |
 | 2 | ○ Pending | 0/0 | 0% |
 | 3 | ○ Pending | 0/0 | 0% |
 | 4 | ○ Pending | 0/0 | 0% |
@@ -43,6 +43,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 
 ## Recent Activity
 
+- 2026-08-21: Phase 1 UAT COMPLETE — all 20 tests resolved, all 6 gaps fixed & retested.
 - 2026-08-21: 01-07 gap closure complete — real output path in success message.
 - 2026-08-21: 01-06 gap closure complete — slugged chat-name folders.
 - 2026-08-21: 01-05 gap closure complete — chat name from ZIP basename.

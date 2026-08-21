@@ -1,6 +1,6 @@
 ---
 phase: 01-parsing-model-core
-verified_at: 2026-08-21
+verified_at: 2026-08-21 (re-verified after gap closures)
 status: passed
 mode: mvp
 requirements: [PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07]
@@ -29,6 +29,21 @@ requirements: [PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE
 - **Requirements traceability:** PARSE-01..07 all `[x]` Complete in REQUIREMENTS.md.
 - **Plans:** 3/3 executed with SUMMARY.md each (01-01 f8e86ac/c27c698 · 01-02 e5eb826/3cbccf3 · 01-03 92167d1/e2fe890).
 - **Locked decisions D-01..D-19:** all honored — local wall-clock ISO (no TZ), 8-value type set, raw authors, day-first default, 0x1F dedupe key, stable ascending order, UTF-8 no BOM.
+
+## Gap Closure Record
+
+All 6 UAT gaps diagnosed, fixed, and re-tested:
+
+| Gap | Fix Plan | Retest |
+|-----|----------|--------|
+| G-01-4 CSV newline escaping | 01-04 (cb06a9b) | test 13 pass |
+| G-01-7 npm flag reachability | 01-04 (f371e40) | test 14 pass |
+| G-01-8 override flags via npm | 01-04 (f371e40) | test 15 pass |
+| G-01-16 chat name from zip basename | 01-05 (0e436a2) | confirmed by user |
+| G-01-17 slugified output folders | 01-06 (5de91a2) | test 18 pass |
+| G-01-19 real path in success message | 01-07 (d804f92) | test 20 pass |
+
+Final UAT: 20 tests — 14 passed outright + 5 issues fixed & retested + 1 restored. 30/30 automated tests green.
 
 ## Known Gaps (non-blocking)
 

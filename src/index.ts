@@ -25,8 +25,8 @@ export function buildCli() {
         });
         // eslint-disable-next-line no-console
         console.log(
-          pc.green(`✓ Wrote ${count} messages`) +
-            pc.dim(` to ${opts.out ?? 'out/'} (see <chat>/messages.csv)`),
+          pc.green(`✓ Merged ${count} new message(s)`) +
+            pc.dim(` into ${opts.out ?? 'out/'}/<chat>/messages.csv`),
         );
       } catch (err) {
         // eslint-disable-next-line no-console

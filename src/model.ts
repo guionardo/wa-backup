@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import pc from 'picocolors';
 import { extractChatTxt, chatNameFromZip } from './extract';
 import { parseMessages } from './parse/message';
-import { writeCsv } from './csv';
+import { mergeCsv } from './csv';
 import type { Detection } from './parse/timestamp';
 import type { Message } from './parse/types';
 
@@ -70,7 +70,9 @@ export async function runParser(
     messages.push(m);
   }
 
-  await writeCsv(path.join(dir, 'messages.csv'), messages);
+  // Incremental merge into the CSV source-of-truth (D-13/D-16/D-17):
+  // re-runs dedupe against existing rows and keep the file sorted ascending.
+  const added = await mergeCsv(path.join(dir, 'messages.csv'), messages);
 
   if (opts.verbose) {
     verboseReport(
@@ -79,5 +81,5 @@ export async function runParser(
       messages.length,
     );
   }
-  return messages.length;
+  return added;
 }

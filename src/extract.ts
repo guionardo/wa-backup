@@ -2,6 +2,7 @@ import { Unzip, AsyncUnzipInflate } from 'fflate';
 import { createReadStream } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import * as readline from 'node:readline';
+import * as path from 'node:path';
 
 /**
  * Stream a WhatsApp export ZIP and resolve a `readline.Interface` over the
@@ -140,9 +141,12 @@ export async function chatNameFromZip(zipPath: string): Promise<string> {
   }
 
   const parts = chatEntry.split('/');
-  const top = parts.length > 1 ? parts[0] : '';
-  const fallback = parts[parts.length - 1].replace(/_chat\.txt$/, '');
-  const raw = top || fallback;
+  // Real WhatsApp exports keep `_chat.txt` at the archive ROOT (no folder) —
+  // derive the chat name from the ZIP file basename in that case (G-01-16).
+  const raw =
+    parts.length > 1
+      ? parts[0]
+      : path.basename(zipPath).replace(/\.zip$/i, '');
   const safe = raw.replace(/\.\.+/g, '').replace(/\//g, '_').trim();
   return safe || 'chat';
 }

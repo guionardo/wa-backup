@@ -164,3 +164,19 @@ test('no phantom empty rows before media rows (both samples)', async () => {
     }
   }
 });
+
+test('G-01-16: root-level _chat.txt derives chat name from ZIP basename', async () => {
+  const txt = fs.readFileSync(path.join(ROOT, 'data', WK, '_chat.txt'));
+  const zipped = zipSync({ '_chat.txt': txt }); // NO folder — real-export layout
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-root-'));
+  const zipPath = path.join(tmp, 'WhatsApp Chat - Root Level.zip');
+  fs.writeFileSync(zipPath, Buffer.from(zipped));
+
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-root-out-'));
+  await runParser(zipPath, { out });
+
+  const csvPath = path.join(out, 'WhatsApp Chat - Root Level', 'messages.csv');
+  assert.ok(fs.existsSync(csvPath), `expected CSV at ${csvPath}`);
+  const records = parseCsv(fs.readFileSync(csvPath, 'utf8')).slice(1);
+  assert.ok(records.length > 0);
+});

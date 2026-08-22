@@ -49,7 +49,7 @@ function mediaHtml(
     const rel = escapeHtml(entry.relPath); // media/F (relative to messages.html)
     const alt = escapeHtml(m.media);
     if (m.type === 'photo' || m.type === 'sticker') {
-      return `<img src="${rel}" alt="${alt}" loading="lazy">`;
+      return `<img class="media-img" src="${rel}" alt="${alt}" loading="lazy">`;
     }
     if (m.type === 'video') {
       return `<video src="${rel}" controls>`;
@@ -69,7 +69,7 @@ async function readFileAsDataUri(
   const dataUri = `data:${entry.mime};base64,${bytes.toString('base64')}`;
   const alt = escapeHtml(m.media);
   if (m.type === 'photo' || m.type === 'sticker') {
-    return `<img src="${dataUri}" alt="${alt}" loading="lazy">`;
+    return `<img class="media-img" src="${dataUri}" alt="${alt}" loading="lazy">`;
   }
   if (m.type === 'video') {
     return `<video src="${dataUri}" controls>`;
@@ -232,6 +232,10 @@ body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-ser
 .bubble-text.system { font-style:italic; color:var(--muted); }
 .bubble-time { font-size:11px; color:var(--muted); margin-left:auto; white-space:nowrap; }
 .media-placeholder { display:inline-block; background:rgba(0,0,0,.06); border:1px solid rgba(0,0,0,.1); border-radius:6px; padding:2px 6px; font-size:12px; color:var(--muted); }
+.media-img { max-width:220px; max-height:280px; border-radius:6px; cursor:zoom-in; display:block; }
+.lightbox { position:fixed; inset:0; background:rgba(0,0,0,.88); display:none; align-items:center; justify-content:center; z-index:100; cursor:zoom-out; }
+.lightbox.open { display:flex; }
+.lightbox img { max-width:95vw; max-height:95vh; border-radius:4px; }
 @media print { body { background:#fff; } #toolbar { display:none; } .outgoing .bubble, .incoming .bubble { box-shadow:none; } }
 `;
 
@@ -282,6 +286,25 @@ ${transcript}
 <script type="application/json" id="chat-data">${islandJson}</script>
 <script type="module">
 ${js}
+</script>
+<div class="lightbox" id="lightbox"><img alt=""></div>
+<script>
+  (function(){
+    var lb = document.getElementById('lightbox');
+    var img = lb && lb.querySelector('img');
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if (t && t.classList && t.classList.contains('media-img') && img) {
+        img.src = t.getAttribute('src'); img.alt = t.getAttribute('alt') || '';
+        lb.classList.add('open'); e.preventDefault();
+      } else if (lb && lb.classList.contains('open')) {
+        lb.classList.remove('open');
+      }
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && lb) lb.classList.remove('open');
+    });
+  })();
 </script>
 </body>
 </html>

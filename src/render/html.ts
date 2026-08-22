@@ -1,0 +1,230 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { readCsv } from '../csv';
+import type { Message } from '../parse/types';
+import { buildEnvelope, dayOf, timeOf } from './json';
+import { getAccentColor, initials } from './colors';
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const MEDIA_ICON: Record<string, string> = {
+  photo: '📷 photo',
+  sticker: '📷 photo',
+  video: '🎬 video',
+  document: '📄 document',
+  audio: '🎧 audio',
+};
+
+function mediaHtml(m: Message): string {
+  const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+  return `<span class="media-placeholder">${escapeHtml(`${label}: ${m.media}`)}</span>`;
+}
+
+/** Most frequent author is treated as the export owner (outgoing side). */
+function pickSelfAuthor(messages: Message[]): string {
+  const counts = new Map<string, number>();
+  for (const m of messages) {
+    if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') continue;
+    counts.set(m.author, (counts.get(m.author) ?? 0) + 1);
+  }
+  let best = '';
+  let bestN = -1;
+  for (const [a, n] of counts) {
+    if (n > bestN) {
+      best = a;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+const FIVE_MIN = 5 * 60 * 1000;
+function tsMs(iso: string): number {
+  return new Date(iso).getTime();
+}
+
+function renderBubble(
+  group: Message[],
+  selfAuthor: string,
+): string {
+  const first = group[0];
+  const outgoing = first.author === selfAuthor;
+  const side = outgoing ? 'outgoing' : 'incoming';
+  const accent = escapeHtml(getAccentColor(first.author));
+  const av = escapeHtml(initials(first.author));
+
+  const header =
+    first.type === 'system' || first.type === 'deleted' || first.type === 'omitted'
+      ? ''
+      : `<div class="bubble-sender" style="color:${accent}">${escapeHtml(first.author)}</div>`;
+
+  const lines = group
+    .map((m) => {
+      const time = timeOf(m.timestamp_iso).slice(0, 5);
+      let body: string;
+      if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
+        return `<div class="bubble-text system">${escapeHtml(m.text)}</div>`;
+      } else if (m.media) {
+        body = mediaHtml(m);
+      } else {
+        body = `<span class="bubble-text">${escapeHtml(m.text)}</span>`;
+      }
+      return `<div class="bubble-line">${body}<span class="bubble-time">${time}</span></div>`;
+    })
+    .join('');
+
+  const avatar =
+    side === 'incoming' && first.type !== 'system' && first.type !== 'deleted' && first.type !== 'omitted'
+      ? `<div class="avatar" style="background:${accent}">${av}</div>`
+      : '';
+
+  return (
+    `<div class="bubble-row ${side}">` +
+    avatar +
+    `<div class="bubble">${header}${lines}</div>` +
+    `</div>`
+  );
+}
+
+function renderDayPill(day: string): string {
+  const d = new Date(day + 'T12:00:00Z');
+  const label = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(d);
+  return `<div class="day-pill">${escapeHtml(label)}</div>`;
+}
+
+function renderTranscript(messages: Message[]): string {
+  const self = pickSelfAuthor(messages);
+  const out: string[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const group: Message[] = [messages[i]];
+    let j = i + 1;
+    while (j < messages.length) {
+      const prev = messages[j - 1];
+      const cur = messages[j];
+      const sameSender = prev.author === cur.author;
+      const withinWindow = tsMs(cur.timestamp_iso) - tsMs(prev.timestamp_iso) <= FIVE_MIN;
+      const bothUser =
+        prev.type !== 'system' &&
+        prev.type !== 'deleted' &&
+        prev.type !== 'omitted' &&
+        cur.type !== 'system' &&
+        cur.type !== 'deleted' &&
+        cur.type !== 'omitted';
+      if (sameSender && withinWindow && bothUser) {
+        group.push(cur);
+        j++;
+      } else {
+        break;
+      }
+    }
+    const day = dayOf(group[0].timestamp_iso);
+    if (out.length === 0 || out[out.length - 1] !== day) {
+      out.push(day);
+    }
+    out.push(renderBubble(group, self));
+    i = j;
+  }
+  // Convert day markers to day-pills.
+  const html: string[] = [];
+  for (const item of out) {
+    if (item.length === 10 && item[4] === '-') {
+      html.push(renderDayPill(item));
+    } else {
+      html.push(item);
+    }
+  }
+  return html.join('\n');
+}
+
+const CSS = `
+:root { --bg:#efeae2; --panel:#ffffff; --ink:#111; --muted:#667781; }
+[data-theme="dark"] { --bg:#0b141a; --panel:#1f2c34; --ink:#e9edef; --muted:#8696a0; }
+* { box-sizing:border-box; }
+body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+#toolbar { position:sticky; top:0; z-index:10; display:flex; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid rgba(0,0,0,.1); }
+#toolbar input, #toolbar select { padding:6px 8px; border:1px solid #ccc; border-radius:6px; font-size:14px; }
+#theme-toggle { margin-left:auto; cursor:pointer; border:1px solid #ccc; border-radius:6px; background:var(--panel); color:var(--ink); padding:6px 10px; }
+#transcript { max-width:768px; margin:16px auto; padding:0 8px; display:flex; flex-direction:column; gap:4px; }
+.day-pill { align-self:center; background:rgba(0,0,0,.12); color:var(--muted); font-size:12px; padding:3px 10px; border-radius:10px; margin:8px 0; text-align:center; }
+.bubble-row { display:flex; gap:8px; align-items:flex-end; }
+.bubble-row.outgoing { justify-content:flex-end; }
+.bubble-row.incoming { justify-content:flex-start; }
+.avatar { width:28px; height:28px; border-radius:50%; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.bubble { max-width:75%; padding:6px 9px; border-radius:8px; font-size:14px; line-height:1.35; }
+.outgoing .bubble { background:#d9fdd3; }
+[data-theme="dark"] .outgoing .bubble { background:#005c4b; }
+.incoming .bubble { background:var(--panel); }
+.bubble-sender { font-size:13px; font-weight:600; margin-bottom:2px; }
+.bubble-line { display:flex; gap:6px; align-items:baseline; }
+.bubble-text.system { font-style:italic; color:var(--muted); }
+.bubble-time { font-size:11px; color:var(--muted); margin-left:auto; white-space:nowrap; }
+.media-placeholder { display:inline-block; background:rgba(0,0,0,.06); border:1px solid rgba(0,0,0,.1); border-radius:6px; padding:2px 6px; font-size:12px; color:var(--muted); }
+@media print { body { background:#fff; } #toolbar { display:none; } .outgoing .bubble, .incoming .bubble { box-shadow:none; } }
+`;
+
+export async function renderHtml(
+  csvPath: string,
+  outDir: string,
+  chatName: string,
+): Promise<string> {
+  const messages = readCsv(csvPath);
+  const envelope = buildEnvelope(messages, chatName);
+  const transcript = renderTranscript(messages);
+
+  // Escape `</` in serialized JSON so message text containing </script> cannot
+  // break the document (D-32 landmine).
+  const islandJson = JSON.stringify(envelope).replace(/<\//g, '<\\/');
+
+  const jsPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'js', 'transcript.js');
+  const js = await fs.readFile(jsPath, 'utf8');
+
+  const authors = [...new Set(messages.map((m) => m.author))].sort();
+  const authorOptions = authors
+    .map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`)
+    .join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(chatName)} — WhatsApp Backup</title>
+<style>${CSS}</style>
+</head>
+<body>
+<div id="toolbar">
+  <input id="search" type="search" placeholder="Buscar…" aria-label="Buscar mensagens">
+  <select id="sender-filter" aria-label="Filtrar por remetente">
+    <option value="">Todos os contatos</option>
+    ${authorOptions}
+  </select>
+  <button id="theme-toggle" type="button">🌓 Tema</button>
+</div>
+<div id="transcript">
+${transcript}
+</div>
+<script type="application/json" id="chat-data">${islandJson}</script>
+<script type="module">
+${js}
+</script>
+</body>
+</html>
+`;
+
+  const outPath = path.join(outDir, 'messages.html');
+  await fs.writeFile(outPath, html, 'utf8');
+  return outPath;
+}

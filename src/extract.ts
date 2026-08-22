@@ -125,6 +125,24 @@ export function slugifyChatName(name: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+/** Resolve the raw chat name (e.g. `WhatsApp Chat - Plataforma WK`). */
+function rawChatName(names: string[], zipPath: string): string {
+  const chatEntry = names.find((n) => {
+    const base = n.split('/').pop() ?? '';
+    const isAppleDouble = n.includes('__MACOSX') || base.startsWith('._');
+    return !isAppleDouble && base.endsWith('_chat.txt');
+  });
+  if (!chatEntry) {
+    throw new Error('No _chat.txt entry found in ZIP');
+  }
+  const parts = chatEntry.split('/');
+  // Real WhatsApp exports keep `_chat.txt` at the archive ROOT (no folder) —
+  // derive the chat name from the ZIP file basename in that case (G-01-16).
+  return parts.length > 1
+    ? parts[0]
+    : path.basename(zipPath).replace(/\.zip$/i, '');
+}
+
 /**
  * Open the ZIP, read ONLY entry names (never inflate), and return the chat's
  * top-level folder name (e.g. `WhatsApp Chat - Plataforma WK`) sanitized for
@@ -146,23 +164,36 @@ export async function chatNameFromZip(zipPath: string): Promise<string> {
       })
       .on('error', reject);
   });
-
-  const chatEntry = names.find((n) => {
-    const base = n.split('/').pop() ?? '';
-    const isAppleDouble = n.includes('__MACOSX') || base.startsWith('._');
-    return !isAppleDouble && base.endsWith('_chat.txt');
-  });
-  if (!chatEntry) {
-    throw new Error('No _chat.txt entry found in ZIP');
-  }
-
-  const parts = chatEntry.split('/');
-  // Real WhatsApp exports keep `_chat.txt` at the archive ROOT (no folder) —
-  // derive the chat name from the ZIP file basename in that case (G-01-16).
-  const raw =
-    parts.length > 1
-      ? parts[0]
-      : path.basename(zipPath).replace(/\.zip$/i, '');
+  const raw = rawChatName(names, zipPath);
   const slug = slugifyChatName(raw);
   return slug || 'chat';
+}
+
+/**
+ * Like `chatNameFromZip` but returns both the directory slug and the
+ * human-readable display name (the chat title without the `WhatsApp Chat - `
+ * prefix). Used by the render pipeline for `metadata.chatName`.
+ */
+export async function chatInfoFromZip(
+  zipPath: string,
+): Promise<{ slug: string; name: string }> {
+  const names = await new Promise<string[]>((resolve, reject) => {
+    const unzip = new Unzip();
+    unzip.register(AsyncUnzipInflate);
+    const collected: string[] = [];
+    unzip.onfile = (file) => {
+      collected.push(file.name);
+    };
+    createReadStream(zipPath)
+      .on('data', (chunk: Buffer) => unzip.push(new Uint8Array(chunk)))
+      .on('end', () => {
+        unzip.push(new Uint8Array(0), true);
+        resolve(collected);
+      })
+      .on('error', reject);
+  });
+  const raw = rawChatName(names, zipPath);
+  const slug = slugifyChatName(raw) || 'chat';
+  const name = raw.replace(/^whatsapp chat\s*-\s*/i, '').trim() || slug;
+  return { slug, name };
 }

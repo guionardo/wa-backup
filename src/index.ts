@@ -18,6 +18,7 @@ export function buildCli() {
     .option('--day-first', 'force day/month date order')
     .option('--month-first', 'force month/day date order')
     .option('--verbose', 'report detected format, locale guess, overrides')
+  .option('--inline', 'embed resolved media as base64 into a single self-contained HTML file')
     .addHelpText(
       'after',
       `
@@ -46,6 +47,7 @@ Note the "--" in the npm form: without it, npm swallows flags like --verbose.`,
           dayFirst: Boolean(opts.dayFirst),
           monthFirst: Boolean(opts.monthFirst),
           verbose: Boolean(opts.verbose),
+          inline: Boolean(opts.inline),
         });
         const { slug } = await chatInfoFromZip(zip);
         const outDir = (opts.out as string | undefined) ?? 'output';

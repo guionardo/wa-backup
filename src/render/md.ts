@@ -48,6 +48,7 @@ function mediaLabel(m: Message): string {
 export async function renderMarkdown(
   csvPath: string,
   outDir: string,
+  _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
   const groups = new Map<string, Message[]>();

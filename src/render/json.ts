@@ -66,6 +66,7 @@ export async function renderJson(
   csvPath: string,
   outDir: string,
   chatName: string,
+  _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
   const envelope = buildEnvelope(messages, chatName);

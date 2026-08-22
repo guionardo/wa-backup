@@ -8,6 +8,7 @@ import { mergeCsv } from './csv';
 import { renderJson } from './render/json';
 import { renderMarkdown } from './render/md';
 import { renderHtml } from './render/html';
+import { reconcileMedia } from './media';
 import type { Detection } from './parse/timestamp';
 import type { Message } from './parse/types';
 
@@ -16,6 +17,8 @@ export interface RunOptions {
   dayFirst?: boolean;
   monthFirst?: boolean;
   verbose?: boolean;
+  /** Embed resolved media as base64 `data:` URIs into a single HTML file. */
+  inline?: boolean;
 }
 
 /** D-07 — transparency report for the detected file format. */
@@ -64,13 +67,14 @@ export interface RenderResult {
 export async function renderOutputs(
   dir: string,
   chatName: string,
+  opts: { inline?: boolean } = {},
 ): Promise<RenderResult> {
   const csvPath = path.join(dir, 'messages.csv');
   if (!existsSync(csvPath)) return {};
   const result: RenderResult = {};
-  result.json = await renderJson(csvPath, dir, chatName);
-  result.md = await renderMarkdown(csvPath, dir);
-  result.html = await renderHtml(csvPath, dir, chatName);
+  result.json = await renderJson(csvPath, dir, chatName, opts);
+  result.md = await renderMarkdown(csvPath, dir, opts);
+  result.html = await renderHtml(csvPath, dir, chatName, opts);
   return result;
 }
 
@@ -102,9 +106,15 @@ export async function runParser(
   // re-runs dedupe against existing rows and keep the file sorted ascending.
   const added = await mergeCsv(path.join(dir, 'messages.csv'), messages);
 
+  // MEDIA-01/02: reconcile referenced media and copy matched files to
+  // <dir>/media/. Never throws on unresolved — missing refs are reported and
+  // rendered as placeholders (MEDIA-03 / MEDIA-04).
+  const distinctMedia = [...new Set(messages.map((m) => m.media).filter(Boolean))];
+  const mediaReport = await reconcileMedia(zipPath, dir, distinctMedia);
+
   // Single run ALWAYS emits all four formats (D-22). The render pipeline reads
   // the freshly merged CSV back from disk.
-  await renderOutputs(dir, name);
+  await renderOutputs(dir, name, { inline: Boolean(opts.inline) });
 
   if (opts.verbose) {
     verboseReport(
@@ -112,6 +122,21 @@ export async function runParser(
       warnings,
       messages.length,
     );
+  }
+
+  // MEDIA-03 reporting: surface resolved/unresolved counts on stderr so the
+  // JSON/MD/HTML artifacts stay clean (D-M7).
+  if (opts.verbose || mediaReport.resolved.length + mediaReport.unresolved.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      pc.dim('[wa-backup] media:') +
+        ` ${mediaReport.resolved.length} resolved` +
+        `, ${mediaReport.unresolved.length} unresolved`,
+    );
+    for (const u of mediaReport.unresolved) {
+      // eslint-disable-next-line no-console
+      console.error(pc.yellow(`  unresolved: ${u}`));
+    }
   }
   return added;
 }

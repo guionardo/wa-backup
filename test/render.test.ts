@@ -1,0 +1,162 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { zipSync } from 'fflate';
+import { runParser } from '../src/model';
+import { slugifyChatName } from '../src/extract';
+
+const ROOT = process.cwd();
+const WK = 'WhatsApp Chat - Plataforma WK';
+const NOTAS = 'WhatsApp Chat - Notas pessoais';
+
+async function runFixture(chat: string, out: string): Promise<void> {
+  const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
+  const zipped = zipSync({ [`${chat}/_chat.txt`]: txt });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-render-'));
+  const zipPath = path.join(tmp, 'export.zip');
+  fs.writeFileSync(zipPath, Buffer.from(zipped));
+  fs.mkdirSync(out, { recursive: true });
+  await runParser(zipPath, { out });
+}
+
+function outDirFor(out: string, chat: string): string {
+  return path.join(out, slugifyChatName(chat));
+}
+
+function readJson(out: string, chat: string) {
+  return JSON.parse(
+    fs.readFileSync(path.join(outDirFor(out, chat), 'messages.json'), 'utf8'),
+  );
+}
+
+test('WK: JSON envelope structure and metadata', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-json-'));
+  await runFixture(WK, out);
+  const env = readJson(out, WK);
+
+  assert.equal(env.metadata.chatName, 'Plataforma WK');
+  assert.equal(typeof env.metadata.messageCount, 'number');
+  assert.ok(env.metadata.messageCount > 0);
+  assert.deepEqual(env.metadata.dateRange, ['2026-07-23', '2026-08-20']);
+  assert.equal(env.metadata.exportSource, 'whatsapp-export');
+
+  const first = env.messages[0];
+  for (const k of ['timestampIso', 'type', 'author', 'text', 'media', 'day', 'time']) {
+    assert.ok(k in first, `missing field ${k}`);
+  }
+  assert.equal(first.day, '2026-07-23');
+  assert.equal(first.time, '09:47:18');
+});
+
+test('WK: message count matches CSV row count', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-json2-'));
+  await runFixture(WK, out);
+  const env = readJson(out, WK);
+  const csv = fs
+    .readFileSync(path.join(outDirFor(out, WK), 'messages.csv'), 'utf8')
+    .trim()
+    .split('\n');
+  assert.equal(env.metadata.messageCount, csv.length - 1);
+});
+
+test('WK: Markdown day sections, format, media, deleted', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-md-'));
+  await runFixture(WK, out);
+  const md = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.md'), 'utf8');
+
+  assert.ok(md.includes('## 23 de julho de 2026'), 'pt-BR day section');
+  assert.ok(
+    md.includes(
+      '**Plataforma WK** · 09:47 — Messages and calls are end-to-end encrypted',
+    ),
+    'first message format',
+  );
+  assert.ok(
+    md.includes('[📷 photo: 00003010-STICKER-2026-07-23-12-41-49.webp]'),
+    'sticker media link',
+  );
+  assert.ok(md.includes('*Mensagem apagada*'), 'deleted message italic');
+});
+
+test('Notas: deleted + document-omitted render in Markdown', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-md2-'));
+  await runFixture(NOTAS, out);
+  const md = fs.readFileSync(path.join(outDirFor(out, NOTAS), 'messages.md'), 'utf8');
+
+  assert.ok(md.includes('*Mensagem apagada*'), 'deleted');
+  assert.ok(
+    md.includes('*document omitted*') || md.includes('autorizacao_atividade.pdf'),
+    'document omitted marker preserved',
+  );
+});
+
+test('WK: HTML shell has data island, toolbar, theme toggle, day-pill', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-html-'));
+  await runFixture(WK, out);
+  const html = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.html'), 'utf8');
+
+  assert.ok(html.includes('<script type="application/json" id="chat-data">'), 'data island');
+  assert.ok(html.includes('id="toolbar"'), 'toolbar');
+  assert.ok(html.includes('class="day-pill"'), 'day-pill class in CSS');
+  assert.ok(html.includes('id="theme-toggle"'), 'theme toggle');
+  assert.ok(html.includes('function populateTranscript'), 'populateTranscript defined');
+  assert.ok(html.includes('textContent'), 'textContent usage');
+  assert.ok(
+    html.includes(
+      '<span class="media-placeholder">📷 photo: 00003010-STICKER-2026-07-23-12-41-49.webp</span>',
+    ),
+    'media placeholder span',
+  );
+});
+
+test('XSS: adversarial content renders inert in all three outputs (OUT-05)', async () => {
+  const chat = 'WhatsApp Chat - XSS Test';
+  const lines = [
+    '23/07/2026 09:47 - Owner: <script>alert("xss")</script>',
+    '23/07/2026 09:48 - Owner: <img src=x onerror="alert(1)">',
+    '23/07/2026 09:49 - Owner: javascript:alert(1)',
+    '23/07/2026 09:50 - Owner: Normal message',
+  ].join('\n');
+  const zipped = zipSync({ [`${chat}/_chat.txt`]: Buffer.from(lines, 'utf8') });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-xss-'));
+  const zipPath = path.join(tmp, 'xss.zip');
+  fs.writeFileSync(zipPath, Buffer.from(zipped));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-xss-out-'));
+  await runParser(zipPath, { out });
+
+  const dir = path.join(out, slugifyChatName(chat));
+  const json = JSON.parse(fs.readFileSync(path.join(dir, 'messages.json'), 'utf8'));
+  const md = fs.readFileSync(path.join(dir, 'messages.md'), 'utf8');
+  const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+
+  // JSON keeps the raw (but safely-quoted) string.
+  assert.equal(json.messages[0].text, '<script>alert("xss")</script>');
+
+  // Markdown escapes HTML.
+  assert.ok(md.includes('&lt;script&gt;alert'), 'MD escapes <script>');
+  assert.ok(!md.includes('<script>alert'), 'MD has no raw <script>');
+
+  // HTML: server-rendered bubble text escaped; the data island never breaks out.
+  assert.ok(html.includes('&lt;script&gt;alert'), 'HTML escapes <script> in bubbles');
+  // The adversarial message's closing tag is escaped (</ -> <\/), so the raw
+  // payload `<script>alert("xss")</script>` must NOT appear literally.
+  assert.ok(
+    !html.includes('<script>alert("xss")</script>'),
+    'adversarial </script> is escaped, not literal',
+  );
+  assert.ok(html.includes('<\\/script>'), 'island escapes </ to <\\/');
+  // No executable javascript: href.
+  assert.ok(!/href\s*=\s*["']?\s*javascript:/i.test(html), 'no javascript: href');
+});
+
+test('HTML: per-sender accent color is deterministic and distinct', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-color-'));
+  await runFixture(WK, out);
+  const html = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.html'), 'utf8');
+  // Same author hue is consistent; find two distinct author colors.
+  const hues = [...html.matchAll(/color:hsl\((\d+), 70%, 60%\)/g)].map((m) => m[1]);
+  assert.ok(hues.length >= 2, 'multiple accent colors applied');
+  assert.notEqual(hues[0], hues[1], 'distinct senders map to distinct hues');
+});

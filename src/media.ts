@@ -185,10 +185,11 @@ export async function reconcileMedia(
   const entries = readCentralDirectory(zipPath);
   const index = new Map<string, ZipEntryMeta>(); // normalized base -> meta
   for (const e of entries) {
-    if (isAppleDouble(e.name) || e.name.split('/').pop()!.endsWith('_chat.txt')) {
+    const base = e.name.split('/').pop()!;
+    if (isAppleDouble(e.name) || base.endsWith('_chat.txt')) {
       continue;
     }
-    index.set(normalizeMediaName(e.name), e);
+    index.set(normalizeMediaName(base), e);
   }
 
   const resolvedSet = new Set<string>();

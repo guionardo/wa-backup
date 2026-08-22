@@ -80,6 +80,23 @@ test('WK: Markdown day sections, format, media, deleted', async () => {
   assert.ok(md.includes('*Mensagem apagada*'), 'deleted message italic');
 });
 
+test('WK: Markdown messages are separated by blank lines (no merge)', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-md-sep-'));
+  await runFixture(WK, out);
+  const md = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.md'), 'utf8');
+  const lines = md.split('\n');
+  const headers = lines
+    .map((l, i) => ({ l, i }))
+    .filter((x) => /\*\*.*\*\* · \d{2}:\d{2} — /.test(x.l));
+  assert.ok(headers.length >= 2, 'multiple message headers present');
+  for (let k = 1; k < headers.length; k++) {
+    assert.ok(
+      headers[k].i - headers[k - 1].i >= 2,
+      `message headers must have a blank line between them (found adjacent at line ${headers[k].i + 1})`,
+    );
+  }
+});
+
 test('Notas: deleted + document-omitted render in Markdown', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-md2-'));
   await runFixture(NOTAS, out);

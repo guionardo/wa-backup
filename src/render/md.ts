@@ -85,6 +85,7 @@ export async function renderMarkdown(
         const body = m.media ? mediaLabel(m, media) : linkifyMarkdown(m.text);
         lines.push(`**${escapeMd(m.author)}** · ${time} — ${body}`);
       }
+      lines.push('');
     }
     lines.push('');
   }

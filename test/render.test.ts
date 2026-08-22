@@ -160,3 +160,16 @@ test('HTML: per-sender accent color is deterministic and distinct', async () => 
   assert.ok(hues.length >= 2, 'multiple accent colors applied');
   assert.notEqual(hues[0], hues[1], 'distinct senders map to distinct hues');
 });
+
+test('WK: chat title shown in HTML header and Markdown H1', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-title-'));
+  await runFixture(WK, out);
+  const html = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.html'), 'utf8');
+  const md = fs.readFileSync(path.join(outDirFor(out, WK), 'messages.md'), 'utf8');
+
+  assert.ok(
+    html.includes('id="chat-title"') && html.includes('Plataforma WK'),
+    'HTML header shows chat title',
+  );
+  assert.ok(md.startsWith('# Plataforma WK'), 'Markdown starts with chat title H1');
+});

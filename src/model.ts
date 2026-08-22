@@ -73,7 +73,7 @@ export async function renderOutputs(
   if (!existsSync(csvPath)) return {};
   const result: RenderResult = {};
   result.json = await renderJson(csvPath, dir, chatName, opts);
-  result.md = await renderMarkdown(csvPath, dir, opts);
+  result.md = await renderMarkdown(csvPath, dir, chatName, opts);
   result.html = await renderHtml(csvPath, dir, chatName, opts);
   return result;
 }

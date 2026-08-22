@@ -219,6 +219,7 @@ body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-ser
 #toolbar { position:sticky; top:0; z-index:10; display:flex; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid rgba(0,0,0,.1); }
 #toolbar input, #toolbar select { padding:6px 8px; border:1px solid #ccc; border-radius:6px; font-size:14px; }
 #theme-toggle { margin-left:auto; cursor:pointer; border:1px solid #ccc; border-radius:6px; background:var(--panel); color:var(--ink); padding:6px 10px; }
+.chat-title { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%; min-width:0; }
 #transcript { max-width:768px; margin:16px auto; padding:0 8px; display:flex; flex-direction:column; gap:4px; }
 .day-pill { align-self:center; background:rgba(0,0,0,.12); color:var(--muted); font-size:12px; padding:3px 10px; border-radius:10px; margin:8px 0; text-align:center; }
 .bubble-row { display:flex; gap:8px; align-items:flex-end; }
@@ -275,6 +276,7 @@ export async function renderHtml(
 </head>
 <body>
 <div id="toolbar">
+  <div class="chat-title" id="chat-title">${escapeHtml(chatName)}</div>
   <input id="search" type="search" placeholder="Buscar…" aria-label="Buscar mensagens">
   <select id="sender-filter" aria-label="Filtrar por remetente">
     <option value="">Todos os contatos</option>

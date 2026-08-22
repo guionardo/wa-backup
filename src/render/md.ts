@@ -57,6 +57,7 @@ function mediaLabel(m: Message, media: Map<string, MediaEntry>): string {
 export async function renderMarkdown(
   csvPath: string,
   outDir: string,
+  chatName: string,
   _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
@@ -71,6 +72,8 @@ export async function renderMarkdown(
   const sortedDays = [...groups.keys()].sort();
 
   const lines: string[] = [];
+  lines.push(`# ${escapeMd(chatName)}`);
+  lines.push('');
   for (const day of sortedDays) {
     lines.push(`## ${fullPtBrDate(day)}`);
     lines.push('');

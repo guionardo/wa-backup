@@ -211,9 +211,10 @@ function renderTranscript(
 }
 
 const CSS = `
-:root { --bg:#efeae2; --panel:#ffffff; --ink:#111; --muted:#667781; }
-[data-theme="dark"] { --bg:#0b141a; --panel:#1f2c34; --ink:#e9edef; --muted:#8696a0; }
+:root { --bg:#efeae2; --panel:#ffffff; --ink:#111; --muted:#667781; --link:#0b93f6; }
+[data-theme="dark"] { --bg:#0b141a; --panel:#1f2c34; --ink:#e9edef; --muted:#8696a0; --link:#58a6ff; }
 * { box-sizing:border-box; }
+a { color:var(--link); text-decoration:underline; }
 body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
 #toolbar { position:sticky; top:0; z-index:10; display:flex; gap:8px; padding:8px 12px; background:var(--panel); border-bottom:1px solid rgba(0,0,0,.1); }
 #toolbar input, #toolbar select { padding:6px 8px; border:1px solid #ccc; border-radius:6px; font-size:14px; }

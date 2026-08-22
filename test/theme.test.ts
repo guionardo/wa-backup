@@ -34,3 +34,14 @@ test('transcript.js: theme toggle not double-bound in the module', () => {
     'module does not bind theme-toggle (classic script owns it)',
   );
 });
+
+test('html: link color is theme-aware (visible in dark mode)', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-linkclr-'));
+  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  const dir = path.join(out, slugifyChatName(NOTAS));
+  const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+
+  assert.ok(html.includes('--link:#0b93f6'), 'light link color token');
+  assert.ok(html.includes('--link:#58a6ff'), 'dark link color token');
+  assert.ok(html.includes('a { color:var(--link)'), 'anchors use the link token');
+});

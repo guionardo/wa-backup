@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import * as path from 'node:path';
 import pc from 'picocolors';
 import { runParser } from './model';
-import { chatNameFromZip } from './extract';
+import { chatInfoFromZip } from './extract';
 
 export function buildCli() {
   const program = new Command();
@@ -47,12 +47,20 @@ Note the "--" in the npm form: without it, npm swallows flags like --verbose.`,
           monthFirst: Boolean(opts.monthFirst),
           verbose: Boolean(opts.verbose),
         });
-        const chat = await chatNameFromZip(zip);
-        const outDir = (opts.out as string | undefined) ?? 'out';
+        const { slug } = await chatInfoFromZip(zip);
+        const outDir = (opts.out as string | undefined) ?? 'output';
+        const base = path.join(outDir, slug);
         // eslint-disable-next-line no-console
         console.log(
           pc.green(`✓ Merged ${count} new message(s)`) +
-            pc.dim(` into ${path.join(outDir, chat, 'messages.csv')}`),
+            pc.dim(` into ${path.join(base, 'messages.csv')}`),
+        );
+        // eslint-disable-next-line no-console
+        console.log(
+          pc.dim('  rendered:') +
+            ` ${path.join(base, 'messages.json')}` +
+            ` ${path.join(base, 'messages.md')}` +
+            ` ${path.join(base, 'messages.html')}`,
         );
       } catch (err) {
         // eslint-disable-next-line no-console

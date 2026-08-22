@@ -5,6 +5,7 @@ import { buildMediaMap } from '../media';
 import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { dayOf, timeOf } from './json';
+import { linkifyMarkdown } from './js/linkify.js';
 
 const PT_BR_DATE = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit',
@@ -75,10 +76,10 @@ export async function renderMarkdown(
     lines.push('');
     for (const m of groups.get(day)!) {
       if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
-        lines.push(`*${escapeMd(m.text)}*`);
+        lines.push(`*${linkifyMarkdown(m.text)}*`);
       } else {
         const time = timeOf(m.timestamp_iso).slice(0, 5); // HH:mm
-        const body = m.media ? mediaLabel(m, media) : escapeMd(m.text);
+        const body = m.media ? mediaLabel(m, media) : linkifyMarkdown(m.text);
         lines.push(`**${escapeMd(m.author)}** · ${time} — ${body}`);
       }
     }

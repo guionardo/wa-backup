@@ -6,6 +6,7 @@ import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { buildEnvelope, dayOf, timeOf } from './json';
 import { getAccentColor, initials } from './colors';
+import { linkifyHtml } from './js/linkify.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -123,11 +124,11 @@ function renderBubble(
       const time = timeOf(m.timestamp_iso).slice(0, 5);
       let body: string;
       if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
-        return `<div class="bubble-text system">${escapeHtml(m.text)}</div>`;
+        return `<div class="bubble-text system">${linkifyHtml(m.text)}</div>`;
       } else if (m.media) {
         body = await mediaHtml(m, media, inline, dir);
       } else {
-        body = `<span class="bubble-text">${escapeHtml(m.text)}</span>`;
+        body = `<span class="bubble-text">${linkifyHtml(m.text)}</span>`;
       }
       return `<div class="bubble-line">${body}<span class="bubble-time">${time}</span></div>`;
     });

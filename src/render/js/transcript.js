@@ -82,10 +82,19 @@ function bubbleRow(m, selfAuthor, accent) {
     setText(t, m.text);
     line.appendChild(t);
   } else if (m.media) {
-    const ph = document.createElement('span');
-    ph.className = 'media-placeholder';
-    setText(ph, mediaLabel(m));
-    line.appendChild(ph);
+    if (m.mediaPath) {
+      const img = document.createElement('img');
+      img.className = 'media-img';
+      img.src = m.mediaPath;
+      img.alt = m.media;
+      img.loading = 'lazy';
+      line.appendChild(img);
+    } else {
+      const ph = document.createElement('span');
+      ph.className = 'media-placeholder';
+      setText(ph, mediaLabel(m));
+      line.appendChild(ph);
+    }
   } else {
     const t = document.createElement('span');
     t.className = 'bubble-text';

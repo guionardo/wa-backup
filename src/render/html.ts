@@ -306,6 +306,23 @@ ${js}
     });
   })();
 </script>
+<script>
+  (function(){
+    function applyTheme(t){
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('theme', t); } catch (e) {}
+    }
+    try {
+      var saved = localStorage.getItem('theme');
+      if (saved) applyTheme(saved);
+    } catch (e) {}
+    var btn = document.getElementById('theme-toggle');
+    if (btn) btn.addEventListener('click', function(){
+      var cur = document.documentElement.getAttribute('data-theme');
+      applyTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+  })();
+</script>
 </body>
 </html>
 `;

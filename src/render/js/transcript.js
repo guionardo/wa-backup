@@ -201,13 +201,8 @@ function applyTheme(theme) {
 function wireControls() {
   const search = document.getElementById('search');
   const sender = document.getElementById('sender-filter');
-  const toggle = document.getElementById('theme-toggle');
   search?.addEventListener('input', () => populateTranscript());
   sender?.addEventListener('change', () => populateTranscript());
-  toggle?.addEventListener('click', () => {
-    const current = document.documentElement.getAttribute('data-theme');
-    applyTheme(current === 'dark' ? 'light' : 'dark');
-  });
 }
 
 function init() {

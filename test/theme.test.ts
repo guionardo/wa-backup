@@ -68,3 +68,13 @@ test('transcript.js: search/sender no longer double-bound in the module', () => 
   const src = fs.readFileSync(path.join(ROOT, 'src/render/js/transcript.js'), 'utf8');
   assert.ok(!/wireControls/.test(src), 'module no longer wires search/sender (classic script owns it)');
 });
+
+test('html: long text/URLs wrap inside the bubble border (no overflow)', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-wrap-'));
+  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  const dir = path.join(out, slugifyChatName(NOTAS));
+  const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+
+  assert.ok(/\.bubble\s*\{[^}]*overflow-wrap:\s*anywhere/.test(html), 'bubble uses overflow-wrap:anywhere');
+  assert.ok(/\.bubble\s*\{[^}]*min-width:\s*0/.test(html), 'bubble allows shrink (min-width:0)');
+});

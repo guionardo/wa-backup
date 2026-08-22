@@ -226,7 +226,7 @@ body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-ser
 .bubble-row.outgoing { justify-content:flex-end; }
 .bubble-row.incoming { justify-content:flex-start; }
 .avatar { width:28px; height:28px; border-radius:50%; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.bubble { max-width:75%; padding:6px 9px; border-radius:8px; font-size:14px; line-height:1.35; }
+.bubble { max-width:75%; padding:6px 9px; border-radius:8px; font-size:14px; line-height:1.35; overflow-wrap:anywhere; word-break:break-word; min-width:0; }
 .outgoing .bubble { background:#d9fdd3; }
 [data-theme="dark"] .outgoing .bubble { background:#005c4b; }
 .incoming .bubble { background:var(--panel); }

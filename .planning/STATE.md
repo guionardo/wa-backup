@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: parsing-model-core
-status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-08-21T20:10:33.145Z"
+current_phase: 2
+current_phase_name: Multi-Format Rendering
+status: phase-2-complete
+stopped_at: Phase 2 plan 02-01 complete
+last_updated: "2026-08-22T11:17:31-0300"
 progress:
-  total_phases: 2
-  completed_phases: 1
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 3
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 7
 ---
 
 # STATE.md
@@ -20,22 +20,22 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-08-21)
 **Core value:** A person can open their WhatsApp history years later and see the full conversation — text and media together — without needing WhatsApp, a phone, or any account.
-**Current focus:** Phase 01 — parsing-model-core
+**Current focus:** Phase 02 — multi-format-rendering
 
 ## Phase Status
 
 | Phase | Status | Plans | Progress |
 |-------|--------|-------|----------|
 | 1 | ✓ Complete | 7/7 | 100% |
-| 2 | ○ Pending | 0/0 | 0% |
+| 2 | ✓ Complete | 1/1 | 100% |
 | 3 | ○ Pending | 0/0 | 0% |
 | 4 | ○ Pending | 0/0 | 0% |
 
 ## Current Position
 
-**Phase:** 1 of 4 — parsing-model-core
-**Plan:** all complete (3/3)
-**Status:** Ready to execute
+**Phase:** 02 (multi-format-rendering) — COMPLETE
+**Plan:** 1 of 1 — ✓ complete
+**Status:** Phase 02 done; ready for Phase 3
 
 ## Active Feature
 
@@ -53,6 +53,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - 2026-08-21: 01-02 complete — locale detection + type classification.
 - 2026-08-21: 01-01 complete — streaming tracer parser + real-sample integration tests.
 - 2026-08-21: Project initialized; requirements defined; roadmap created.
+- 2026-08-22: Phase 2 COMPLETE — 02-01 multi-format rendering (JSON+MD+HTML, XSS-safe) shipped; 37 tests pass.
 
 ## Session
 
@@ -78,3 +79,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - [Phase 01]: SENDER_RE separator `:` + whitespace or EOL — empty-body lines merge, URLs safe
 - [Phase ?]: Omitted-marker brackets optional (Android drops them); detection is lazy in-stream single pass
 - [Phase ?]: runParser returns added-count; CSV merge is the incremental source-of-truth mechanism (D-13/D-16/D-17)
+- [Phase 02]: Single CLI run emits CSV+JSON+MD+HTML; renderers re-read messages.csv (D-20/D-22)
+- [Phase 02]: metadata.chatName = display name (e.g. "Plataforma WK"); folder = slug (plataforma-wk)
+- [Phase 02]: Outgoing side = most-frequent author (no self marker in export); SHA-256(author)%360 -> hue
+- [Phase 02]: eta 4.6 unavailable offline -> HTML shell via inline TS templates (deviation)

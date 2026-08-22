@@ -44,6 +44,11 @@ Plans:
 4. `<Media omitted>` and deleted-message lines appear as visible placeholders in all three outputs.
 
 **Requirements:** OUT-01, OUT-02, OUT-03, OUT-04, OUT-05
+**Plans:** 1/1 plans executed ✓ 2026-08-22 (02-01-SUMMARY.md)
+
+Plans:
+
+- [x] 02-01-PLAN.md — Multi-format rendering pipeline: JSON envelope, Markdown log, WhatsApp-like HTML viewer (data island + client JS), per-sender color, XSS-safe across all outputs
 
 ### Phase 3: Media Reconciliation & Embedding
 
@@ -78,3 +83,14 @@ Plans:
 | 2 | Multi-Format Rendering | Emit JSON + Markdown + WhatsApp-like HTML in one XSS-safe run | OUT-01, OUT-02, OUT-03, OUT-04, OUT-05 | 4 |
 | 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 |
 | 4 | CLI & Portable Delivery | Sensible default output, `--out` override, no-server portability | CLI-01, CLI-02, CLI-03 | 3 |
+
+### Phase 5: Plan phase 2: Multi-format rendering
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 5 to break down)

@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { readCsv } from '../csv';
+import { buildMediaMap } from '../media';
+import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { buildEnvelope, dayOf, timeOf } from './json';
 import { getAccentColor, initials } from './colors';
@@ -22,9 +24,57 @@ const MEDIA_ICON: Record<string, string> = {
   audio: '🎧 audio',
 };
 
-function mediaHtml(m: Message): string {
+/**
+ * Render a media message as real HTML (MEDIA-02 / MEDIA-03):
+ * - resolved + not inlining  -> <img>/<video>/<a> with a relative `media/F` src
+ * - `--inline` + inlineable  -> the same element with a `data:<mime>;base64,…` URI
+ * - missing / not-inlineable (oversized or video under --inline) -> placeholder span
+ * All `src`/`href`/`alt` values are HTML-escaped (OUT-05). Data URIs are built
+ * from trusted local bytes, never from chat text.
+ */
+function mediaHtml(
+  m: Message,
+  media: Map<string, MediaEntry>,
+  inline: boolean,
+  dir: string,
+): string | Promise<string> {
   const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+  const entry = media.get(m.media);
+
+  if (inline && entry && entry.inlineable) {
+    // Bounded read (only inlineable files, < INLINE_MAX_BYTES) from disk.
+    return readFileAsDataUri(m, entry, dir);
+  }
+  if (!inline && entry) {
+    const rel = escapeHtml(entry.relPath); // media/F (relative to messages.html)
+    const alt = escapeHtml(m.media);
+    if (m.type === 'photo' || m.type === 'sticker') {
+      return `<img src="${rel}" alt="${alt}" loading="lazy">`;
+    }
+    if (m.type === 'video') {
+      return `<video src="${rel}" controls>`;
+    }
+    return `<a href="${rel}">${escapeHtml(label)}: ${alt}</a>`;
+  }
+  // Missing-but-expected, or not-inlineable under --inline: placeholder.
   return `<span class="media-placeholder">${escapeHtml(`${label}: ${m.media}`)}</span>`;
+}
+
+async function readFileAsDataUri(
+  m: Message,
+  entry: MediaEntry,
+  dir: string,
+): Promise<string> {
+  const bytes = await fs.readFile(path.join(dir, entry.relPath));
+  const dataUri = `data:${entry.mime};base64,${bytes.toString('base64')}`;
+  const alt = escapeHtml(m.media);
+  if (m.type === 'photo' || m.type === 'sticker') {
+    return `<img src="${dataUri}" alt="${alt}" loading="lazy">`;
+  }
+  if (m.type === 'video') {
+    return `<video src="${dataUri}" controls>`;
+  }
+  return `<a href="${dataUri}">${escapeHtml(MEDIA_ICON[m.type] ?? `📎 ${m.type}`)}: ${alt}</a>`;
 }
 
 /** Most frequent author is treated as the export owner (outgoing side). */
@@ -53,7 +103,10 @@ function tsMs(iso: string): number {
 function renderBubble(
   group: Message[],
   selfAuthor: string,
-): string {
+  media: Map<string, MediaEntry>,
+  inline: boolean,
+  dir: string,
+): Promise<string> {
   const first = group[0];
   const outgoing = first.author === selfAuthor;
   const side = outgoing ? 'outgoing' : 'incoming';
@@ -66,30 +119,30 @@ function renderBubble(
       : `<div class="bubble-sender" style="color:${accent}">${escapeHtml(first.author)}</div>`;
 
   const lines = group
-    .map((m) => {
+    .map(async (m) => {
       const time = timeOf(m.timestamp_iso).slice(0, 5);
       let body: string;
       if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
         return `<div class="bubble-text system">${escapeHtml(m.text)}</div>`;
       } else if (m.media) {
-        body = mediaHtml(m);
+        body = await mediaHtml(m, media, inline, dir);
       } else {
         body = `<span class="bubble-text">${escapeHtml(m.text)}</span>`;
       }
       return `<div class="bubble-line">${body}<span class="bubble-time">${time}</span></div>`;
-    })
-    .join('');
+    });
 
   const avatar =
     side === 'incoming' && first.type !== 'system' && first.type !== 'deleted' && first.type !== 'omitted'
       ? `<div class="avatar" style="background:${accent}">${av}</div>`
       : '';
 
-  return (
-    `<div class="bubble-row ${side}">` +
-    avatar +
-    `<div class="bubble">${header}${lines}</div>` +
-    `</div>`
+  return Promise.all(lines).then(
+    (rendered) =>
+      `<div class="bubble-row ${side}">` +
+      avatar +
+      `<div class="bubble">${header}${rendered.join('')}</div>` +
+      `</div>`,
   );
 }
 
@@ -104,9 +157,14 @@ function renderDayPill(day: string): string {
   return `<div class="day-pill">${escapeHtml(label)}</div>`;
 }
 
-function renderTranscript(messages: Message[]): string {
+function renderTranscript(
+  messages: Message[],
+  media: Map<string, MediaEntry>,
+  inline: boolean,
+  dir: string,
+): Promise<string> {
   const self = pickSelfAuthor(messages);
-  const out: string[] = [];
+  const out: (string | Promise<string>)[] = [];
   let i = 0;
   while (i < messages.length) {
     const group: Message[] = [messages[i]];
@@ -134,19 +192,21 @@ function renderTranscript(messages: Message[]): string {
     if (out.length === 0 || out[out.length - 1] !== day) {
       out.push(day);
     }
-    out.push(renderBubble(group, self));
+    out.push(renderBubble(group, self, media, inline, dir));
     i = j;
   }
   // Convert day markers to day-pills.
-  const html: string[] = [];
-  for (const item of out) {
-    if (item.length === 10 && item[4] === '-') {
-      html.push(renderDayPill(item));
-    } else {
-      html.push(item);
+  return Promise.all(out).then((items) => {
+    const html: string[] = [];
+    for (const item of items) {
+      if (item.length === 10 && item[4] === '-') {
+        html.push(renderDayPill(item));
+      } else {
+        html.push(item);
+      }
     }
-  }
-  return html.join('\n');
+    return html.join('\n');
+  });
 }
 
 const CSS = `
@@ -182,8 +242,10 @@ export async function renderHtml(
   _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
+  const inline = Boolean(_opts.inline);
+  const media = buildMediaMap(outDir, messages);
   const envelope = buildEnvelope(messages, chatName);
-  const transcript = renderTranscript(messages);
+  const transcript = await renderTranscript(messages, media, inline, outDir);
 
   // Escape `</` in serialized JSON so message text containing </script> cannot
   // break the document (D-32 landmine).

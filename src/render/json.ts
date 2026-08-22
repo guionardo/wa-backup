@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { readCsv } from '../csv';
+import { buildMediaMap } from '../media';
+import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 
 export interface RenderedMessage {
@@ -9,6 +11,8 @@ export interface RenderedMessage {
   author: string;
   text: string;
   media: string;
+  /** Relative path to the reconciled media file, or null when missing. */
+  mediaPath: string | null;
   day: string;
   time: string;
 }
@@ -31,13 +35,17 @@ export function timeOf(iso: string): string {
   return iso.slice(11);
 }
 
-export function toRendered(m: Message): RenderedMessage {
+export function toRendered(
+  m: Message,
+  mediaPath: string | null = null,
+): RenderedMessage {
   return {
     timestampIso: m.timestamp_iso,
     type: m.type,
     author: m.author,
     text: m.text,
     media: m.media,
+    mediaPath,
     day: dayOf(m.timestamp_iso),
     time: timeOf(m.timestamp_iso),
   };
@@ -46,8 +54,11 @@ export function toRendered(m: Message): RenderedMessage {
 export function buildEnvelope(
   messages: Message[],
   chatName: string,
+  mediaMap?: Map<string, MediaEntry>,
 ): JsonEnvelope {
-  const rendered = messages.map(toRendered);
+  const rendered = messages.map((m) =>
+    toRendered(m, mediaMap?.get(m.media)?.relPath ?? null),
+  );
   const days = rendered.map((m) => m.day).filter(Boolean).sort();
   const dateRange: [string, string] =
     days.length > 0 ? [days[0], days[days.length - 1]] : ['', ''];
@@ -69,7 +80,7 @@ export async function renderJson(
   _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
-  const envelope = buildEnvelope(messages, chatName);
+  const envelope = buildEnvelope(messages, chatName, buildMediaMap(outDir, messages));
   const outPath = path.join(outDir, 'messages.json');
   await fs.writeFile(outPath, JSON.stringify(envelope), 'utf8');
   return outPath;

@@ -1,6 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { readCsv } from '../csv';
+import { buildMediaMap } from '../media';
+import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { dayOf, timeOf } from './json';
 
@@ -33,8 +35,14 @@ function escapeMd(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function mediaLabel(m: Message): string {
+function mediaLabel(m: Message, media: Map<string, MediaEntry>): string {
   const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+  const entry = media.get(m.media);
+  if (entry) {
+    // Resolved -> a real markdown link to the relative media path (MEDIA-02).
+    return `[${label}: ${escapeMd(m.media)}](${escapeMd(entry.relPath)})`;
+  }
+  // Unresolved -> keep the bracket placeholder (no broken link).
   return `[${label}: ${escapeMd(m.media)}]`;
 }
 
@@ -51,6 +59,7 @@ export async function renderMarkdown(
   _opts: { inline?: boolean } = {},
 ): Promise<string> {
   const messages = readCsv(csvPath);
+  const media = buildMediaMap(outDir, messages);
   const groups = new Map<string, Message[]>();
   for (const m of messages) {
     const day = dayOf(m.timestamp_iso);
@@ -69,7 +78,7 @@ export async function renderMarkdown(
         lines.push(`*${escapeMd(m.text)}*`);
       } else {
         const time = timeOf(m.timestamp_iso).slice(0, 5); // HH:mm
-        const body = m.media ? mediaLabel(m) : escapeMd(m.text);
+        const body = m.media ? mediaLabel(m, media) : escapeMd(m.text);
         lines.push(`**${escapeMd(m.author)}** · ${time} — ${body}`);
       }
     }

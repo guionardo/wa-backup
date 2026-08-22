@@ -45,3 +45,26 @@ test('html: link color is theme-aware (visible in dark mode)', async () => {
   assert.ok(html.includes('--link:#58a6ff'), 'dark link color token');
   assert.ok(html.includes('a { color:var(--link)'), 'anchors use the link token');
 });
+
+test('html: text/sender filter works from file:// (classic, non-module script)', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-filter-'));
+  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  const dir = path.join(out, slugifyChatName(NOTAS));
+  const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+
+  // Server rows carry data-author so the sender filter can match offline.
+  assert.ok(/class="bubble-row [^"]*" data-author="/.test(html), 'bubble rows carry data-author');
+
+  // Filter logic lives in a classic (non-module) script so it runs under file://.
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+  const filter = scripts.find(
+    (s) => s[1].trim() === '' && s[2].includes("getElementById('search')") && s[2].includes('applyFilter'),
+  );
+  assert.ok(filter, 'classic filter script found');
+  assert.ok(!/type="module"/.test(filter[1]), 'filter script is NOT a module');
+});
+
+test('transcript.js: search/sender no longer double-bound in the module', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/render/js/transcript.js'), 'utf8');
+  assert.ok(!/wireControls/.test(src), 'module no longer wires search/sender (classic script owns it)');
+});

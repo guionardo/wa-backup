@@ -140,7 +140,7 @@ function renderBubble(
 
   return Promise.all(lines).then(
     (rendered) =>
-      `<div class="bubble-row ${side}">` +
+      `<div class="bubble-row ${side}" data-author="${escapeHtml(first.author)}">` +
       avatar +
       `<div class="bubble">${header}${rendered.join('')}</div>` +
       `</div>`,
@@ -323,6 +323,39 @@ ${js}
       var cur = document.documentElement.getAttribute('data-theme');
       applyTheme(cur === 'dark' ? 'light' : 'dark');
     });
+  })();
+</script>
+<script>
+  (function(){
+    function applyFilter() {
+      var searchEl = document.getElementById('search');
+      var senderEl = document.getElementById('sender-filter');
+      var q = (searchEl && searchEl.value ? searchEl.value : '').trim().toLowerCase();
+      var sender = senderEl && senderEl.value ? senderEl.value : '';
+      var rows = document.querySelectorAll('.bubble-row');
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var text = (row.textContent || '').toLowerCase();
+        var author = row.getAttribute('data-author') || '';
+        var show = (!q || text.indexOf(q) !== -1) && (!sender || author === sender);
+        row.style.display = show ? '' : 'none';
+      }
+      var pills = document.querySelectorAll('.day-pill');
+      for (var j = 0; j < pills.length; j++) {
+        var pill = pills[j];
+        var sib = pill.nextElementSibling;
+        var anyVisible = false;
+        while (sib && !sib.classList.contains('day-pill')) {
+          if (sib.classList.contains('bubble-row') && sib.style.display !== 'none') anyVisible = true;
+          sib = sib.nextElementSibling;
+        }
+        pill.style.display = anyVisible ? '' : 'none';
+      }
+    }
+    var searchEl = document.getElementById('search');
+    var senderEl = document.getElementById('sender-filter');
+    if (searchEl) searchEl.addEventListener('input', applyFilter);
+    if (senderEl) senderEl.addEventListener('change', applyFilter);
   })();
 </script>
 </body>

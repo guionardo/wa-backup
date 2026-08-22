@@ -199,13 +199,6 @@ function applyTheme(theme) {
   }
 }
 
-function wireControls() {
-  const search = document.getElementById('search');
-  const sender = document.getElementById('sender-filter');
-  search?.addEventListener('input', () => populateTranscript());
-  sender?.addEventListener('change', () => populateTranscript());
-}
-
 function init() {
   let saved = 'light';
   try {
@@ -214,7 +207,6 @@ function init() {
     /* storage unavailable */
   }
   applyTheme(saved);
-  wireControls();
   populateTranscript();
 }
 

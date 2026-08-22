@@ -13,7 +13,16 @@ const NOTAS = 'WhatsApp Chat - Notas pessoais';
 
 async function runFixture(chat: string, out: string): Promise<void> {
   const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
-  const zipped = zipSync({ [`${chat}/_chat.txt`]: txt });
+  const files: Record<string, Uint8Array> = { [`${chat}/_chat.txt`]: txt };
+  // Include the real media folder when present so renderers can resolve it.
+  const mediaDir = path.join(ROOT, 'data', chat);
+  if (fs.existsSync(mediaDir)) {
+    for (const f of fs.readdirSync(mediaDir)) {
+      if (f.startsWith('._') || f === '_chat.txt') continue;
+      files[`${chat}/${f}`] = fs.readFileSync(path.join(mediaDir, f));
+    }
+  }
+  const zipped = zipSync(files);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-render-'));
   const zipPath = path.join(tmp, 'export.zip');
   fs.writeFileSync(zipPath, Buffer.from(zipped));
@@ -74,8 +83,8 @@ test('WK: Markdown day sections, format, media, deleted', async () => {
     'first message format',
   );
   assert.ok(
-    md.includes('[📷 photo: 00003010-STICKER-2026-07-23-12-41-49.webp]'),
-    'sticker media link',
+    md.includes('![00003010-STICKER-2026-07-23-12-41-49.webp](media/00003010-STICKER-2026-07-23-12-41-49.webp)'),
+    'sticker embedded as Markdown image',
   );
   assert.ok(md.includes('*Mensagem apagada*'), 'deleted message italic');
 });
@@ -121,10 +130,9 @@ test('WK: HTML shell has data island, toolbar, theme toggle, day-pill', async ()
   assert.ok(html.includes('function populateTranscript'), 'populateTranscript defined');
   assert.ok(html.includes('textContent'), 'textContent usage');
   assert.ok(
-    html.includes(
-      '<span class="media-placeholder">📷 photo: 00003010-STICKER-2026-07-23-12-41-49.webp</span>',
-    ),
-    'media placeholder span',
+    html.includes('class="media-img"') &&
+      html.includes('00003010-STICKER-2026-07-23-12-41-49.webp'),
+    'media rendered as resolved <img> (not placeholder)',
   );
 });
 

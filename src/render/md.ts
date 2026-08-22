@@ -36,22 +36,47 @@ function escapeMd(s: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function mediaLabel(m: Message, media: Map<string, MediaEntry>): string {
-  const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+/**
+ * Markdown body for a media message.
+ * - photo/sticker -> embedded image `![alt](src)` (optionally a `data:` URI
+ *   when `--inline` and the file is inlineable), with the caption as text.
+ * - video/document/audio -> a Markdown link to the media path.
+ * - unresolved media -> bracket placeholder (no broken link).
+ */
+async function mediaMarkdown(
+  m: Message,
+  media: Map<string, MediaEntry>,
+  inline: boolean,
+  outDir: string,
+): Promise<string> {
   const entry = media.get(m.media);
-  if (entry) {
-    // Resolved -> a real markdown link to the relative media path (MEDIA-02).
-    return `[${label}: ${escapeMd(m.media)}](${escapeMd(entry.relPath)})`;
+  if (!entry) {
+    const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+    return `[${label}: ${escapeMd(m.media)}]`;
   }
-  // Unresolved -> keep the bracket placeholder (no broken link).
-  return `[${label}: ${escapeMd(m.media)}]`;
+  const isImg = m.type === 'photo' || m.type === 'sticker';
+  let src: string;
+  if (inline && entry.inlineable) {
+    const bytes = await fs.readFile(path.join(outDir, entry.relPath));
+    src = `data:${entry.mime};base64,${bytes.toString('base64')}`;
+  } else {
+    src = entry.relPath;
+  }
+  if (isImg) {
+    const img = `![${escapeMd(m.media)}](${src})`;
+    const caption = m.text ? linkifyMarkdown(m.text) : '';
+    return caption ? `${img} ${caption}` : img;
+  }
+  const label = MEDIA_ICON[m.type] ?? `📎 ${m.type}`;
+  return `[${label}: ${escapeMd(m.media)}](${src})`;
 }
 
 /**
  * Render the chat as a day-sectioned Markdown log (D-45/D-46/D-47).
  * - `## <pt-BR full date>` per day
  * - `**Sender** · HH:mm — text` per message
- * - media -> `[📷 photo: FILENAME]` link
+ * - media -> embedded image `![FILENAME](media/FILENAME)` (photo/sticker) or
+ *   a link for video/document; `--inline` embeds as a `data:` URI
  * - system/deleted/omitted -> italic `*text*` line
  */
 export async function renderMarkdown(
@@ -62,6 +87,7 @@ export async function renderMarkdown(
 ): Promise<string> {
   const messages = readCsv(csvPath);
   const media = buildMediaMap(outDir, messages);
+  const inline = Boolean(_opts.inline);
   const groups = new Map<string, Message[]>();
   for (const m of messages) {
     const day = dayOf(m.timestamp_iso);
@@ -82,7 +108,7 @@ export async function renderMarkdown(
         lines.push(`*${linkifyMarkdown(m.text)}*`);
       } else {
         const time = timeOf(m.timestamp_iso).slice(0, 5); // HH:mm
-        const body = m.media ? mediaLabel(m, media) : linkifyMarkdown(m.text);
+        const body = m.media ? await mediaMarkdown(m, media, inline, outDir) : linkifyMarkdown(m.text);
         lines.push(`**${escapeMd(m.author)}** · ${time} — ${body}`);
       }
       lines.push('');

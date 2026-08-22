@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Multi-Format Rendering
-status: phase-2-complete
-stopped_at: Phase 2 plan 02-01 complete
-last_updated: "2026-08-22T11:17:31-0300"
+current_phase: 03
+current_phase_name: media-reconciliation-embedding
+status: executing
+stopped_at: Phase 3 plan 03-01 complete
+last_updated: "2026-08-22T16:30:00.000Z"
 progress:
-  total_phases: 3
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # STATE.md
@@ -20,7 +20,7 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-08-21)
 **Core value:** A person can open their WhatsApp history years later and see the full conversation — text and media together — without needing WhatsApp, a phone, or any account.
-**Current focus:** Phase 02 — multi-format-rendering
+**Current focus:** Phase 03 — media-reconciliation-embedding
 
 ## Phase Status
 
@@ -28,14 +28,14 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 |-------|--------|-------|----------|
 | 1 | ✓ Complete | 7/7 | 100% |
 | 2 | ✓ Complete | 1/1 | 100% |
-| 3 | ○ Pending | 0/0 | 0% |
+| 3 | ✓ Complete | 1/1 | 100% |
 | 4 | ○ Pending | 0/0 | 0% |
 
 ## Current Position
 
-**Phase:** 02 (multi-format-rendering) — COMPLETE
-**Plan:** 1 of 1 — ✓ complete
-**Status:** Phase 02 done; ready for Phase 3
+**Phase:** 03 (media-reconciliation-embedding) — COMPLETE
+**Plan:** 1 of 1
+**Status:** Phase 03 complete — media reconciliation & embedding shipped
 
 ## Active Feature
 
@@ -54,6 +54,8 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - 2026-08-21: 01-01 complete — streaming tracer parser + real-sample integration tests.
 - 2026-08-21: Project initialized; requirements defined; roadmap created.
 - 2026-08-22: Phase 2 COMPLETE — 02-01 multi-format rendering (JSON+MD+HTML, XSS-safe) shipped; 37 tests pass.
+- 2026-08-22: Phase 3 PLANNED — 03-01 media reconciliation & embedding (MEDIA-01..04): copy media, relative refs, `--inline` base64, placeholder preservation.
+- 2026-08-22: Phase 3 COMPLETE — 03-01 media reconciliation & embedding shipped; 43 tests pass (37 existing + 6 new); `wa-backup <zip>` copies 17 media files + `--inline` self-contained HTML.
 
 ## Session
 
@@ -72,6 +74,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 | Phase 01 P01-05 | 10m | 1 tasks | 2 files |
 | Phase 01 P01-06 | 10m | 1 tasks | 4 files |
 | Phase 01 P01-07 | 5m | 1 tasks | 1 files |
+| Phase 03 03-01 | 35m | 6 tasks | 6 files |
 
 ## Decisions
 
@@ -83,3 +86,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - [Phase 02]: metadata.chatName = display name (e.g. "Plataforma WK"); folder = slug (plataforma-wk)
 - [Phase 02]: Outgoing side = most-frequent author (no self marker in export); SHA-256(author)%360 -> hue
 - [Phase 02]: eta 4.6 unavailable offline -> HTML shell via inline TS templates (deviation)
+- [Phase 03]: reconcileMedia reads the ZIP central directory (random-access) + streams each member via Node `zlib.createInflateRaw` — required because fflate's streaming inflate breaks on data-descriptor members (the sample's nested `.zip` attachment), so the planned fflate `file.start()` path was replaced (deviation, Rule 1)
+- [Phase 03]: match by entry BASENAME (not full path) so zips with a folder prefix also reconcile (MEDIA-01 robustness)
+- [Phase 03]: disk-resident `buildMediaMap(dir, messages)` decouples renderers from the zip — re-render from CSV works without the archive (D-M5)
+- [Phase 03]: `--inline` embeds inlineable files (< 8 MiB, non-video) as `data:` URIs; video/oversized stay placeholders; unresolved refs reported to stderr, never crash (MEDIA-03/04)

@@ -62,6 +62,11 @@ Plans:
 4. `<Media omitted>` and deleted-message placeholders remain visible in outputs alongside any reconciled media.
 
 **Requirements:** MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04
+**Plans:** 1/1 plans executed ✓ 2026-08-22 (03-01-SUMMARY.md)
+
+Plans:
+
+- [x] 03-01-PLAN.md — Media reconciliation & embedding: enumerate+match+copy media from ZIP (streaming), disk-resident media map, JSON `mediaPath` + MD links + HTML `<img>/<video>/<a>`, `--inline` base64 with size cap, placeholder preservation for omitted/deleted/missing
 
 ### Phase 4: CLI & Portable Delivery
 
@@ -81,7 +86,7 @@ Plans:
 |---|-------|------|--------------|------------------|
 | 1 | Parsing & Model Core | Read a WhatsApp export ZIP into a normalized, locale-tolerant message model | PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07 | 4 |
 | 2 | Multi-Format Rendering | Emit JSON + Markdown + WhatsApp-like HTML in one XSS-safe run | OUT-01, OUT-02, OUT-03, OUT-04, OUT-05 | 4 |
-| 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 |
+| 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 (0/1 plans) |
 | 4 | CLI & Portable Delivery | Sensible default output, `--out` override, no-server portability | CLI-01, CLI-02, CLI-03 | 3 |
 
 ### Phase 5: Plan phase 2: Multi-format rendering

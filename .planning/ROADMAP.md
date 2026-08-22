@@ -86,7 +86,7 @@ Plans:
 |---|-------|------|--------------|------------------|
 | 1 | Parsing & Model Core | Read a WhatsApp export ZIP into a normalized, locale-tolerant message model | PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07 | 4 |
 | 2 | Multi-Format Rendering | Emit JSON + Markdown + WhatsApp-like HTML in one XSS-safe run | OUT-01, OUT-02, OUT-03, OUT-04, OUT-05 | 4 |
-| 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 (0/1 plans) |
+| 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 (1/1 plans) |
 | 4 | CLI & Portable Delivery | Sensible default output, `--out` override, no-server portability | CLI-01, CLI-02, CLI-03 | 3 |
 
 ### Phase 5: Plan phase 2: Multi-format rendering

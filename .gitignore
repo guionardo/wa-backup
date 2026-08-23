@@ -6,3 +6,6 @@ data/
 *.log
 out/
 output/
+
+# GSD ephemeral research cache
+.planning/research/.cache/

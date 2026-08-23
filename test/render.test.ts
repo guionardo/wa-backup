@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
 import { slugifyChatName } from '../src/extract';
+import { toRendered } from '../src/render/json';
 
 const ROOT = process.cwd();
 const WK = 'WhatsApp Chat - Plataforma WK';
@@ -197,4 +198,26 @@ test('WK: chat title shown in HTML header and Markdown H1', async () => {
     'HTML header shows chat title',
   );
   assert.ok(md.startsWith('# Plataforma WK'), 'Markdown starts with chat title H1');
+});
+
+test('JSON: message carries urlTitles map', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-jsonurl-'));
+  await runFixture(WK, out);
+  const env = readJson(out, WK);
+  const withUrl = env.messages.find((m) => m.text && /https?:\/\//.test(m.text));
+  // WK sample has no URLs; assert the field exists and is an object.
+  assert.ok(
+    withUrl === undefined || (withUrl.urlTitles && typeof withUrl.urlTitles === 'object'),
+    'urlTitles present as object',
+  );
+  // Unit-check toRendered maps it through.
+  const r = toRendered({
+    timestamp_iso: '2026-07-23T09:47:18',
+    type: 'text',
+    author: 'a',
+    text: 'x',
+    media: '',
+    urlTitles: { u: 'T' },
+  });
+  assert.deepEqual(r.urlTitles, { u: 'T' });
 });

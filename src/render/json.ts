@@ -13,6 +13,8 @@ export interface RenderedMessage {
   media: string;
   /** Relative path to the reconciled media file, or null when missing. */
   mediaPath: string | null;
+  /** Per-URL fetched page titles (enrichment); `{}` when absent. */
+  urlTitles: Record<string, string>;
   day: string;
   time: string;
 }
@@ -46,6 +48,7 @@ export function toRendered(
     text: m.text,
     media: m.media,
     mediaPath,
+    urlTitles: m.urlTitles ?? {},
     day: dayOf(m.timestamp_iso),
     time: timeOf(m.timestamp_iso),
   };

@@ -6,7 +6,7 @@ import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { buildEnvelope, dayOf, timeOf } from './json';
 import { getAccentColor, initials } from './colors';
-import { linkifyHtml, deriveTitle } from './js/linkify.js';
+import { linkifyHtml, deriveTitle, faviconFor } from './js/linkify.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -124,12 +124,13 @@ function renderBubble(
       const time = timeOf(m.timestamp_iso).slice(0, 5);
       let body: string;
       const resolve = (u: string) => m.urlTitles?.[u] ?? deriveTitle(u);
+      const icon = (u: string) => faviconFor(u);
       if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
-        return `<div class="bubble-text system">${linkifyHtml(m.text, resolve)}</div>`;
+        return `<div class="bubble-text system">${linkifyHtml(m.text, resolve, icon)}</div>`;
       } else if (m.media) {
         body = await mediaHtml(m, media, inline, dir);
       } else {
-        body = `<span class="bubble-text">${linkifyHtml(m.text, resolve)}</span>`;
+        body = `<span class="bubble-text">${linkifyHtml(m.text, resolve, icon)}</span>`;
       }
       return `<div class="bubble-line">${body}<span class="bubble-time">${time}</span></div>`;
     });
@@ -235,6 +236,7 @@ body { margin:0; font-family: system-ui, "Segoe UI", Helvetica, Roboto, sans-ser
 .bubble-line { display:flex; gap:6px; align-items:baseline; }
 .bubble-text.system { font-style:italic; color:var(--muted); }
 .bubble-time { font-size:11px; color:var(--muted); margin-left:auto; white-space:nowrap; }
+.favicon { width:14px; height:14px; vertical-align:middle; margin-right:4px; border-radius:2px; }
 .media-placeholder { display:inline-block; background:rgba(0,0,0,.06); border:1px solid rgba(0,0,0,.1); border-radius:6px; padding:2px 6px; font-size:12px; color:var(--muted); }
 .media-img { max-width:220px; max-height:280px; border-radius:6px; cursor:zoom-in; display:block; }
 .lightbox { position:fixed; inset:0; background:rgba(0,0,0,.88); display:none; align-items:center; justify-content:center; z-index:100; cursor:zoom-out; }

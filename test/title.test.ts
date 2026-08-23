@@ -98,6 +98,47 @@ test('enrichTitles: disabled leaves urlTitles empty', async () => {
   assert.deepEqual(msgs[0].urlTitles, {});
 });
 
+test('enrichTitles: verbose logs each processed URL', async () => {
+  const srv = await startServer('<title>Verbose Title</title>');
+  const logs: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => logs.push(a.join(' '));
+  try {
+    const msgs: Message[] = [
+      {
+        timestamp_iso: '2026-07-23T09:47:18',
+        type: 'text',
+        author: 'a',
+        text: `see ${srv.url}`,
+        media: '',
+      },
+    ];
+    await enrichTitles(msgs, { enabled: true, timeoutMs: 2000, verbose: true });
+  } finally {
+    console.error = orig;
+    srv.close();
+  }
+  assert.ok(logs.some((l) => l.includes('[wa-backup] title:') && l.includes(srv.url)), 'logs the URL');
+  assert.ok(logs.some((l) => l.includes('Verbose Title')), 'logs the resolved title');
+});
+
+test('enrichTitles: no verbose logging when verbose is false', async () => {
+  const srv = await startServer('<title>Quiet Title</title>');
+  const logs: string[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => logs.push(a.join(' '));
+  try {
+    const msgs: Message[] = [
+      { timestamp_iso: '2026-07-23T09:47:18', type: 'text', author: 'a', text: `see ${srv.url}`, media: '' },
+    ];
+    await enrichTitles(msgs, { enabled: true, timeoutMs: 2000 });
+  } finally {
+    console.error = orig;
+    srv.close();
+  }
+  assert.ok(!logs.some((l) => l.includes('[wa-backup] title:')), 'no title logs when not verbose');
+});
+
 // ---- platform classification + pure parsers ----
 
 test('platformOf: classifies youtube/reddit/linkedin/generic', () => {

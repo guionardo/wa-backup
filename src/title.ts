@@ -1,3 +1,4 @@
+import pc from 'picocolors';
 import type { Message } from './parse/types';
 import { URL_RE, deriveTitle } from './render/js/linkify.js';
 
@@ -149,7 +150,12 @@ export async function fetchTitle(
  */
 export async function enrichTitles(
   messages: Message[],
-  opts: { enabled: boolean; concurrency?: number; timeoutMs?: number } = { enabled: true },
+  opts: {
+    enabled: boolean;
+    concurrency?: number;
+    timeoutMs?: number;
+    verbose?: boolean;
+  } = { enabled: true },
 ): Promise<Message[]> {
   const enabled = opts.enabled;
   if (!enabled) {
@@ -170,7 +176,12 @@ export async function enrichTitles(
       (async () => {
         while (cursor < urls.length) {
           const url = urls[cursor++];
-          map[url] = await fetchTitle(url, { timeoutMs: opts.timeoutMs });
+          const title = await fetchTitle(url, { timeoutMs: opts.timeoutMs });
+          if (opts.verbose) {
+            // eslint-disable-next-line no-console
+            console.error(pc.dim('[wa-backup] title:') + ` ${url} -> ${title}`);
+          }
+          map[url] = title;
         }
       })(),
     );

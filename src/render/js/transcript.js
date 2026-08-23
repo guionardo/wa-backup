@@ -3,7 +3,7 @@
 // only (createElement + textContent). No innerHTML with untrusted strings.
 
 import { setText, clear } from './xss-sanitize.js';
-import { linkifyHtml } from './linkify.js';
+import { linkifyHtml, deriveTitle, faviconFor } from './linkify.js';
 
 const MEDIA_ICON = {
   photo: '📷 photo',
@@ -77,10 +77,12 @@ function bubbleRow(m, selfAuthor, accent) {
 
   const line = document.createElement('div');
   line.className = 'bubble-line';
+  const resolve = (u) => m.urlTitles?.[u] ?? deriveTitle(u);
+  const icon = (u) => faviconFor(u);
   if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
     const t = document.createElement('span');
     t.className = 'bubble-text system';
-    t.innerHTML = linkifyHtml(m.text);
+    t.innerHTML = linkifyHtml(m.text, resolve, icon);
     line.appendChild(t);
   } else if (m.media) {
     if (m.mediaPath) {
@@ -99,7 +101,7 @@ function bubbleRow(m, selfAuthor, accent) {
   } else {
     const t = document.createElement('span');
     t.className = 'bubble-text';
-    t.innerHTML = linkifyHtml(m.text);
+    t.innerHTML = linkifyHtml(m.text, resolve, icon);
     line.appendChild(t);
   }
   const time = document.createElement('span');

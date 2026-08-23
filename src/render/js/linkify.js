@@ -44,9 +44,10 @@ export function deriveTitle(url) {
 }
 
 /** Escape text and wrap http(s) URLs in safe <a> anchors. */
-export function linkifyHtml(text, resolver) {
+export function linkifyHtml(text, resolver, iconResolver) {
   if (!text) return '';
   const resolve = resolver ?? deriveTitle;
+  const iconFor = iconResolver ?? (() => '');
   const re = new RegExp(URL_RE.source, 'gi');
   let result = '';
   let last = 0;
@@ -56,11 +57,24 @@ export function linkifyHtml(text, resolver) {
     const url = trimTrailingPunct(m[0]);
     const href = escapeHtml(url);
     const title = escapeHtml(resolve(url));
-    result += `<a href="${href}" target="_blank" rel="noopener noreferrer">${title}</a>`;
+    const fav = iconFor(url);
+    const favImg = fav
+      ? `<img class="favicon" src="${escapeHtml(fav)}" alt="" loading="lazy">`
+      : '';
+    result += `<a href="${href}" target="_blank" rel="noopener noreferrer">${favImg}${title}</a>`;
     last = m.index + m[0].length;
   }
   result += escapeHtml(text.slice(last));
   return result;
+}
+
+/** Default favicon URL for a page: the site's conventional `/favicon.ico`. */
+export function faviconFor(url) {
+  try {
+    return new URL('/favicon.ico', url).href;
+  } catch {
+    return '';
+  }
 }
 
 /** Escape text and wrap http(s) URLs in Markdown `[title](url)` links. */

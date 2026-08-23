@@ -112,7 +112,12 @@ export async function runParser(
   // titles and persist the URL→title map back into the CSV source-of-truth.
   const { enrichTitles } = await import('./title.js');
   const merged = readCsv(path.join(dir, 'messages.csv'));
-  await enrichTitles(merged, { enabled: !opts.noFetchTitles, concurrency: 8, timeoutMs: 5000 });
+  await enrichTitles(merged, {
+    enabled: !opts.noFetchTitles,
+    concurrency: 8,
+    timeoutMs: 5000,
+    verbose: Boolean(opts.verbose),
+  });
   await writeCsv(path.join(dir, 'messages.csv'), merged);
 
   // MEDIA-01/02: reconcile referenced media and copy matched files to

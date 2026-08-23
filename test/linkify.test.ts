@@ -101,17 +101,16 @@ test('render: URLs become links in HTML + Markdown; JSON text unchanged', async 
   const json = JSON.parse(fs.readFileSync(path.join(dir, 'messages.json'), 'utf8'));
 
   assert.ok(
-    html.includes(
-      '<a href="https://www.github.com/owner/repo?x=1" target="_blank" rel="noopener noreferrer">github.com/owner/repo</a>',
-    ),
-    'HTML anchor with derived title',
+    html.includes('<a href="https://www.github.com/owner/repo?x=1"'),
+    'HTML anchor href',
   );
+  assert.ok(html.includes('github.com/owner/repo</a>'), 'HTML anchor with derived title');
   assert.ok(
-    html.includes(
-      '<a href="https://example.com/" target="_blank" rel="noopener noreferrer">example.com</a>',
-    ),
-    'HTML anchor, root path -> host only',
+    html.includes('<a href="https://example.com/"'),
+    'HTML anchor href, root path',
   );
+  assert.ok(html.includes('example.com</a>'), 'HTML anchor, root path -> host only');
+  assert.ok(html.includes('class="favicon"'), 'HTML anchor has favicon');
 
   assert.ok(
     md.includes('[github.com/owner/repo](https://www.github.com/owner/repo?x=1)'),
@@ -142,3 +141,16 @@ test('linkify: resolver defaults to deriveTitle when omitted', () => {
   const out = linkifyHtml('see https://example.com/path');
   assert.ok(out.includes('>example.com/path</a>'), 'falls back to derived title');
 });
+
+test('linkify: iconResolver prepends a favicon img before the title', () => {
+  const out = linkifyHtml('go https://example.com/x', undefined, (u) => `https://${new URL(u).host}/favicon.ico`);
+  assert.ok(out.includes('class="favicon"'), 'favicon img present');
+  assert.ok(out.includes('src="https://example.com/favicon.ico"'), 'favicon src from iconResolver');
+  assert.ok(out.includes('>example.com/x</a>'), 'title still shown after favicon');
+});
+
+test('linkify: no favicon img when iconResolver empty', () => {
+  const out = linkifyHtml('go https://example.com/x', undefined, () => '');
+  assert.ok(!out.includes('class="favicon"'), 'no favicon when resolver empty');
+});
+

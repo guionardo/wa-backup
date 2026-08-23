@@ -2,20 +2,60 @@ import pc from 'picocolors';
 import type { Message } from './parse/types';
 import { URL_RE, deriveTitle, unwrapUrl } from './render/js/linkify.js';
 
+// Browser-like UA reduces blocks on sites (Medium, etc.) that serve a
+// placeholder to bots.
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+
 const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i;
 
-/** Pull and sanitize the <title> from an HTML string. */
-export function extractTitle(html: string): string | null {
-  const m = html.match(TITLE_RE);
-  if (!m) return null;
-  return m[1]
+function cleanTitle(s: string): string {
+  return s
     .replace(/\s+/g, ' ')
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .trim()
     .slice(0, 300);
 }
 
-export type Platform = 'youtube' | 'reddit' | 'linkedin' | 'generic';
+/** Read a `<meta property|name="key" content="...">` value (either attribute
+ * order) and unescape common HTML entities. */
+function metaContent(html: string, key: string): string | null {
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+(?:property|name)=["']${key}["'][^>]*content=["']([^"']*)["']`,
+      'i',
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${key}["']`,
+      'i',
+    ),
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m) return cleanTitle(m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"'));
+  }
+  return null;
+}
+
+/** Pull a page title: prefer `og:title` / `twitter:title`, fall back to the
+ * document `<title>`. Returns null if neither is present. */
+export function extractTitle(html: string): string | null {
+  const meta = metaContent(html, 'og:title') ?? metaContent(html, 'twitter:title');
+  if (meta) return meta;
+  const m = html.match(TITLE_RE);
+  if (!m) return null;
+  return cleanTitle(m[1]);
+}
+
+export type Platform =
+  | 'youtube'
+  | 'reddit'
+  | 'linkedin'
+  | 'medium'
+  | 'stackoverflow'
+  | 'x'
+  | 'generic';
 
 /** Classify a URL so each host can use its own title-extraction method. */
 export function platformOf(url: string): Platform {
@@ -24,6 +64,9 @@ export function platformOf(url: string): Platform {
     if (h === 'youtube.com' || h === 'youtu.be' || h.endsWith('.youtube.com')) return 'youtube';
     if (h === 'reddit.com' || h.endsWith('.reddit.com')) return 'reddit';
     if (h === 'linkedin.com' || h.endsWith('.linkedin.com')) return 'linkedin';
+    if (h === 'medium.com' || h.endsWith('.medium.com')) return 'medium';
+    if (h === 'stackoverflow.com') return 'stackoverflow';
+    if (h === 'x.com' || h === 'twitter.com') return 'x';
     return 'generic';
   } catch {
     return 'generic';
@@ -72,12 +115,51 @@ export function deriveLinkedInTitle(url: string): string | null {
   }
 }
 
-/** Generic HTML <title> fetch (used by default and as a fallback). */
-async function fetchHtmlTitle(
+// ---- Medium: HTML with a browser UA, og:title-aware (see extractTitle) ----
+
+export async function fetchMediumTitle(
   url: string,
   signal: AbortSignal,
 ): Promise<string | null> {
-  const res = await fetch(url, { signal, redirect: 'follow' });
+  const res = await fetch(url, { signal, redirect: 'follow', headers: { 'User-Agent': UA } });
+  if (!res.ok) return null;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct && !/html/i.test(ct)) return null;
+  return extractTitle(await res.text());
+}
+
+// ---- Stack Overflow: Stack Exchange API ----
+
+export function stackExchangeApiUrl(url: string): string | null {
+  const m = url.match(/\/questions\/(\d+)/);
+  if (!m) return null;
+  return `https://api.stackexchange.com/2.3/questions/${m[1]}?site=stackoverflow`;
+}
+
+export function parseStackOverflowJson(obj: unknown): string | null {
+  const title = (obj as { items?: Array<{ title?: unknown }> })?.items?.[0]?.title;
+  return typeof title === 'string' && title.trim() ? title.trim() : null;
+}
+
+// ---- X / Twitter: no scraping — derive offline from the URL slug ----
+
+export function deriveXTitle(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host !== 'x.com' && host !== 'twitter.com') return null;
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length === 0) return null;
+    const user = parts[0].replace(/^@/, '');
+    return `${user} on X`;
+  } catch {
+    return null;
+  }
+}
+
+/** Generic HTML <title> fetch (used by default and as a fallback). */
+async function fetchHtmlTitle(url: string, signal: AbortSignal): Promise<string | null> {
+  const res = await fetch(url, { signal, redirect: 'follow', headers: { 'User-Agent': UA } });
   if (!res.ok) return null;
   const ct = res.headers.get('content-type') ?? '';
   if (ct && !/html/i.test(ct)) return null;
@@ -86,11 +168,14 @@ async function fetchHtmlTitle(
 
 /**
  * Fetch the page title for a single URL, dispatching per platform:
- * - youtube  -> oEmbed JSON (falls back to generic HTML <title>)
- * - reddit   -> `.json` listing (falls back to generic HTML <title>)
- * - linkedin -> slug-derived, offline (no network)
- * - generic  -> HTML <title>
- * Any failure returns the offline-derived title so callers always get a
+ * - linkedin/x   -> slug-derived, offline (no network)
+ * - youtube      -> oEmbed JSON
+ * - reddit       -> `.json` listing
+ * - medium       -> HTML (og:title-aware) with a browser UA
+ * - stackoverflow-> Stack Exchange API
+ * - generic      -> HTML <title> (og:title-aware)
+ * Any special method that fails falls back to the generic HTML fetch; any
+ * failure there returns the offline-derived title so callers always get a
  * usable label.
  */
 export async function fetchTitle(
@@ -104,9 +189,8 @@ export async function fetchTitle(
   try {
     const platform = platformOf(target);
 
-    if (platform === 'linkedin') {
-      return deriveLinkedInTitle(target) ?? deriveTitle(target);
-    }
+    if (platform === 'linkedin') return deriveLinkedInTitle(target) ?? deriveTitle(target);
+    if (platform === 'x') return deriveXTitle(target) ?? deriveTitle(target);
 
     if (platform === 'youtube') {
       try {
@@ -129,6 +213,30 @@ export async function fetchTitle(
         if (res.ok) {
           const t = parseRedditJson(await res.json());
           if (t) return t;
+        }
+      } catch {
+        // fall through to generic HTML title
+      }
+    }
+
+    if (platform === 'medium') {
+      try {
+        const t = await fetchMediumTitle(target, ac.signal);
+        if (t) return t;
+      } catch {
+        // fall through to generic HTML title
+      }
+    }
+
+    if (platform === 'stackoverflow') {
+      try {
+        const api = stackExchangeApiUrl(target);
+        if (api) {
+          const res = await fetch(api, { signal: ac.signal });
+          if (res.ok) {
+            const t = parseStackOverflowJson(await res.json());
+            if (t) return t;
+          }
         }
       } catch {
         // fall through to generic HTML title

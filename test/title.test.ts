@@ -11,6 +11,10 @@ import {
   redditJsonUrl,
   parseRedditJson,
   deriveLinkedInTitle,
+  fetchMediumTitle,
+  stackExchangeApiUrl,
+  parseStackOverflowJson,
+  deriveXTitle,
 } from '../src/title';
 import { unwrapUrl } from '../src/render/js/linkify.js';
 import type { Message } from '../src/parse/types';
@@ -178,6 +182,105 @@ test('linkedin: title derived from URL slug (offline)', () => {
   );
   assert.equal(deriveLinkedInTitle('https://linkedin.com/company/acme-corp'), 'acme corp');
   assert.equal(deriveLinkedInTitle('https://linkedin.com/feed/'), null);
+});
+
+// ---- new platforms: medium / stackoverflow / x ----
+
+test('platformOf: classifies medium/stackoverflow/x', () => {
+  assert.equal(platformOf('https://medium.com/@me/post'), 'medium');
+  assert.equal(platformOf('https://blog.medium.com/abc'), 'medium');
+  assert.equal(platformOf('https://stackoverflow.com/questions/1/why'), 'stackoverflow');
+  assert.equal(platformOf('https://x.com/nasa/status/99'), 'x');
+  assert.equal(platformOf('https://twitter.com/nasa'), 'x');
+});
+
+test('extractTitle: prefers og:title over document <title>', () => {
+  const html =
+    '<html><head><title>Long Site Name - Medium</title>' +
+    '<meta property="og:title" content="Real Post Title"></head></html>';
+  assert.equal(extractTitle(html), 'Real Post Title');
+});
+
+test('medium: api url + parser + fetch (og:title via mocked fetch)', async () => {
+  assert.equal(
+    stackExchangeApiUrl('https://stackoverflow.com/questions/11299354/why-z'),
+    'https://api.stackexchange.com/2.3/questions/11299354?site=stackoverflow',
+  );
+  assert.equal(
+    parseStackOverflowJson({ items: [{ title: 'SO Question' }] }),
+    'SO Question',
+  );
+  assert.equal(parseStackOverflowJson({}), null);
+
+  // Medium fetch with og:title
+  const html =
+    '<title>ignored</title><meta property="og:title" content="Medium Post">';
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(html, { status: 200, headers: { 'content-type': 'text/html' } })) as any;
+  try {
+    const t = await fetchMediumTitle('https://medium.com/@me/post', new AbortController().signal);
+    assert.equal(t, 'Medium Post');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('fetchTitle: stackoverflow uses the Stack Exchange API', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (u: any) => {
+    if (String(u).includes('api.stackexchange.com')) {
+      return new Response(JSON.stringify({ items: [{ title: 'How to X' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('<title>ignored</title>', { status: 200 });
+  }) as any;
+  try {
+    assert.equal(
+      await fetchTitle('https://stackoverflow.com/questions/11299354/why-z'),
+      'How to X',
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('fetchTitle: medium uses og:title (mocked html)', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      '<title>Site - Medium</title><meta property="og:title" content="Great Post">',
+      { status: 200, headers: { 'content-type': 'text/html' } },
+    )) as any;
+  try {
+    assert.equal(await fetchTitle('https://medium.com/@me/post'), 'Great Post');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('x: title derived offline from URL slug', () => {
+  assert.equal(deriveXTitle('https://x.com/NASA/status/1800000000000000000'), 'NASA on X');
+  assert.equal(deriveXTitle('https://twitter.com/nasa'), 'nasa on X');
+  assert.equal(deriveXTitle('https://x.com/nasa/'), 'nasa on X');
+  assert.equal(deriveXTitle('https://example.com/x'), null);
+});
+
+test('fetchTitle: x is offline (no network)', async () => {
+  let networkCalled = false;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    networkCalled = true;
+    return new Response('<title>x</title>');
+  }) as any;
+  try {
+    assert.equal(await fetchTitle('https://x.com/NASA'), 'NASA on X');
+    assert.equal(networkCalled, false, 'x must not hit the network');
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 // ---- network dispatch via mocked global fetch ----

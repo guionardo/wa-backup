@@ -6,7 +6,7 @@ import type { MediaEntry } from '../media';
 import type { Message } from '../parse/types';
 import { buildEnvelope, dayOf, timeOf } from './json';
 import { getAccentColor, initials } from './colors';
-import { linkifyHtml } from './js/linkify.js';
+import { linkifyHtml, deriveTitle } from './js/linkify.js';
 
 function escapeHtml(s: string): string {
   return s
@@ -123,12 +123,13 @@ function renderBubble(
     .map(async (m) => {
       const time = timeOf(m.timestamp_iso).slice(0, 5);
       let body: string;
+      const resolve = (u: string) => m.urlTitles?.[u] ?? deriveTitle(u);
       if (m.type === 'system' || m.type === 'deleted' || m.type === 'omitted') {
-        return `<div class="bubble-text system">${linkifyHtml(m.text)}</div>`;
+        return `<div class="bubble-text system">${linkifyHtml(m.text, resolve)}</div>`;
       } else if (m.media) {
         body = await mediaHtml(m, media, inline, dir);
       } else {
-        body = `<span class="bubble-text">${linkifyHtml(m.text)}</span>`;
+        body = `<span class="bubble-text">${linkifyHtml(m.text, resolve)}</span>`;
       }
       return `<div class="bubble-line">${body}<span class="bubble-time">${time}</span></div>`;
     });

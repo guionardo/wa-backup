@@ -7,6 +7,10 @@ import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
 import { slugifyChatName } from '../src/extract';
 import { toRendered } from '../src/render/json';
+import { renderMarkdown } from '../src/render/md';
+import { renderHtml } from '../src/render/html';
+import { csvRow } from '../src/csv';
+import type { Message } from '../src/parse/types';
 
 const ROOT = process.cwd();
 const WK = 'WhatsApp Chat - Plataforma WK';
@@ -220,4 +224,29 @@ test('JSON: message carries urlTitles map', async () => {
     urlTitles: { u: 'T' },
   });
   assert.deepEqual(r.urlTitles, { u: 'T' });
+});
+
+test('render: link label uses stored urlTitles when present', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-linkurl-'));
+  await runFixture(WK, out);
+  const dir = outDirFor(out, WK);
+  // Hand-write a CSV row with a URL + url_titles, then re-render md/html.
+  const csv = path.join(dir, 'messages.csv');
+  const rows = fs.readFileSync(csv, 'utf8').trimEnd().split('\n');
+  const extra: Message = {
+    timestamp_iso: '2026-08-01T10:00:00',
+    type: 'text',
+    author: 'Guionardo',
+    text: 'visit https://example.com/foo',
+    media: '',
+    urlTitles: { 'https://example.com/foo': 'Example Foo' },
+  };
+  rows.push(csvRow(extra).trimEnd());
+  fs.writeFileSync(csv, rows.join('\n') + '\n');
+  await renderMarkdown(csv, dir, 'WK', {});
+  await renderHtml(csv, dir, 'WK', {});
+  const md = fs.readFileSync(path.join(dir, 'messages.md'), 'utf8');
+  const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+  assert.ok(md.includes('[Example Foo](https://example.com/foo)'), 'md uses stored title');
+  assert.ok(html.includes('>Example Foo</a>'), 'html uses stored title');
 });

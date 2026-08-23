@@ -1,6 +1,6 @@
 import pc from 'picocolors';
 import type { Message } from './parse/types';
-import { URL_RE, deriveTitle } from './render/js/linkify.js';
+import { URL_RE, deriveTitle, unwrapUrl } from './render/js/linkify.js';
 
 const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i;
 
@@ -98,18 +98,19 @@ export async function fetchTitle(
   opts: { timeoutMs?: number } = {},
 ): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 5000;
+  const target = unwrapUrl(url);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const platform = platformOf(url);
+    const platform = platformOf(target);
 
     if (platform === 'linkedin') {
-      return deriveLinkedInTitle(url) ?? deriveTitle(url);
+      return deriveLinkedInTitle(target) ?? deriveTitle(target);
     }
 
     if (platform === 'youtube') {
       try {
-        const res = await fetch(youTubeOembedUrl(url), { signal: ac.signal });
+        const res = await fetch(youTubeOembedUrl(target), { signal: ac.signal });
         if (res.ok) {
           const t = parseYouTubeOembed(await res.json());
           if (t) return t;
@@ -121,7 +122,7 @@ export async function fetchTitle(
 
     if (platform === 'reddit') {
       try {
-        const res = await fetch(redditJsonUrl(url), {
+        const res = await fetch(redditJsonUrl(target), {
           signal: ac.signal,
           headers: { 'User-Agent': 'wa-backup/1.0 (+title-extractor)' },
         });
@@ -134,9 +135,9 @@ export async function fetchTitle(
       }
     }
 
-    return (await fetchHtmlTitle(url, ac.signal)) ?? deriveTitle(url);
+    return (await fetchHtmlTitle(target, ac.signal)) ?? deriveTitle(target);
   } catch {
-    return deriveTitle(url);
+    return deriveTitle(target);
   } finally {
     clearTimeout(timer);
   }
@@ -163,7 +164,11 @@ export async function enrichTitles(
     return messages;
   }
   const urls = [
-    ...new Set(messages.flatMap((m) => (m.text ?? '').match(URL_RE) ?? [])),
+    ...new Set(
+      messages
+        .flatMap((m) => (m.text ?? '').match(URL_RE) ?? [])
+        .map(unwrapUrl),
+    ),
   ];
   const map: Record<string, string> = {};
   const concurrency = Math.max(1, opts.concurrency ?? 8);
@@ -193,7 +198,8 @@ export async function enrichTitles(
       continue;
     }
     const titles: Record<string, string> = {};
-    for (const u of m.text.match(URL_RE) ?? []) {
+    for (const raw of m.text.match(URL_RE) ?? []) {
+      const u = unwrapUrl(raw);
       titles[u] = map[u] ?? deriveTitle(u);
     }
     m.urlTitles = titles;

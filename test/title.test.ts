@@ -12,6 +12,7 @@ import {
   parseRedditJson,
   deriveLinkedInTitle,
 } from '../src/title';
+import { unwrapUrl } from '../src/render/js/linkify.js';
 import type { Message } from '../src/parse/types';
 
 function startServer(
@@ -248,6 +249,34 @@ test('fetchTitle: youtube falls back to generic title on oEmbed failure', async 
   }) as any;
   try {
     assert.equal(await fetchTitle('https://youtube.com/watch?v=9'), 'Generic Fallback');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('unwrapUrl exported from title module decodes LinkedIn redirect', () => {
+  const li =
+    'https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fexample%2Ecom%2Fp&urlhash=x';
+  assert.equal(unwrapUrl(li), 'https://example.com/p');
+});
+
+test('fetchTitle: LinkedIn redirect resolves the destination title (not LinkedIn)', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (u: any) => {
+    const s = String(u);
+    if (s.includes('linkedin.com')) return new Response('<title>LinkedIn</title>', { status: 200 });
+    if (s.includes('example.com/p')) {
+      return new Response('<title>Real Destination</title>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    return new Response('<title>x</title>');
+  }) as any;
+  try {
+    const li =
+      'https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fexample%2Ecom%2Fp&urlhash=x';
+    assert.equal(await fetchTitle(li), 'Real Destination');
   } finally {
     globalThis.fetch = original;
   }

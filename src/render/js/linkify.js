@@ -43,6 +43,30 @@ export function deriveTitle(url) {
   }
 }
 
+/**
+ * LinkedIn shares links through a redirect wrapper
+ * (e.g. `/safety/go/?url=<percent-encoded destination>`). Return the real
+ * destination so titles, favicons and the clickable href point at the actual
+ * page, not the LinkedIn interstitial. Non-LinkedIn / non-redirect URLs pass
+ * through unchanged.
+ */
+export function unwrapUrl(url) {
+  try {
+    const u = new URL(url);
+    const isLi =
+      u.hostname === 'linkedin.com' || u.hostname.endsWith('.linkedin.com');
+    if (!isLi) return url;
+    const isRedirect =
+      /\/(safety\/go|redir\/redirect|feed\/link|redirect)\b/.test(u.pathname);
+    if (!isRedirect) return url;
+    const target = u.searchParams.get('url');
+    if (!target) return url;
+    return decodeURIComponent(target);
+  } catch {
+    return url;
+  }
+}
+
 /** Escape text and wrap http(s) URLs in safe <a> anchors. */
 export function linkifyHtml(text, resolver, iconResolver) {
   if (!text) return '';
@@ -54,7 +78,7 @@ export function linkifyHtml(text, resolver, iconResolver) {
   let m;
   while ((m = re.exec(text)) !== null) {
     result += escapeHtml(text.slice(last, m.index));
-    const url = trimTrailingPunct(m[0]);
+    const url = unwrapUrl(trimTrailingPunct(m[0]));
     const href = escapeHtml(url);
     const title = escapeHtml(resolve(url));
     const fav = iconFor(url);
@@ -68,15 +92,6 @@ export function linkifyHtml(text, resolver, iconResolver) {
   return result;
 }
 
-/** Default favicon URL for a page: the site's conventional `/favicon.ico`. */
-export function faviconFor(url) {
-  try {
-    return new URL('/favicon.ico', url).href;
-  } catch {
-    return '';
-  }
-}
-
 /** Escape text and wrap http(s) URLs in Markdown `[title](url)` links. */
 export function linkifyMarkdown(text, resolver) {
   if (!text) return '';
@@ -87,7 +102,7 @@ export function linkifyMarkdown(text, resolver) {
   let m;
   while ((m = re.exec(text)) !== null) {
     result += escapeMd(text.slice(last, m.index));
-    const url = trimTrailingPunct(m[0]);
+    const url = unwrapUrl(trimTrailingPunct(m[0]));
     const title = resolve(url).replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
     const safeUrl = url.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');
     result += `[${title}](${safeUrl})`;
@@ -95,4 +110,13 @@ export function linkifyMarkdown(text, resolver) {
   }
   result += escapeMd(text.slice(last));
   return result;
+}
+
+/** Default favicon URL for a page: the site's conventional `/favicon.ico`. */
+export function faviconFor(url) {
+  try {
+    return new URL('/favicon.ico', url).href;
+  } catch {
+    return '';
+  }
 }

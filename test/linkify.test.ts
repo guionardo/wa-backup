@@ -10,6 +10,8 @@ import {
   deriveTitle,
   linkifyHtml,
   linkifyMarkdown,
+  faviconFor,
+  unwrapUrl,
 } from '../src/render/js/linkify.js';
 
 const ROOT = process.cwd();
@@ -152,5 +154,30 @@ test('linkify: iconResolver prepends a favicon img before the title', () => {
 test('linkify: no favicon img when iconResolver empty', () => {
   const out = linkifyHtml('go https://example.com/x', undefined, () => '');
   assert.ok(!out.includes('class="favicon"'), 'no favicon when resolver empty');
+});
+
+// ---- LinkedIn redirect unwrapping ----
+
+test('unwrapUrl: decodes LinkedIn /safety/go redirect to the real destination', () => {
+  const li =
+    'https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fsourcecode%2Ekanaiyakatarmal%2Ecom%2FCLAUDE&urlhash=Wh6w&isSdui=true';
+  assert.equal(unwrapUrl(li), 'https://sourcecode.kanaiyakatarmal.com/CLAUDE');
+});
+
+test('unwrapUrl: passes through non-redirect and profile URLs', () => {
+  assert.equal(unwrapUrl('https://example.com/p'), 'https://example.com/p');
+  assert.equal(
+    unwrapUrl('https://www.linkedin.com/in/john-doe'),
+    'https://www.linkedin.com/in/john-doe',
+  );
+});
+
+test('linkify: LinkedIn redirect href + title use the real destination', () => {
+  const li =
+    'https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fsourcecode%2Ekanaiyakatarmal%2Ecom%2FCLAUDE&urlhash=x';
+  const out = linkifyHtml(li, undefined, faviconFor);
+  assert.ok(out.includes('href="https://sourcecode.kanaiyakatarmal.com/CLAUDE"'), 'href is real destination');
+  assert.ok(out.includes('>sourcecode.kanaiyakatarmal.com/CLAUDE</a>'), 'title from real host');
+  assert.ok(out.includes('src="https://sourcecode.kanaiyakatarmal.com/favicon.ico"'), 'favicon of real host');
 });
 

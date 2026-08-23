@@ -35,6 +35,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "pretest": "node scripts/generate-fixtures.mjs",
     "test": "node --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {

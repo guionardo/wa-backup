@@ -17,10 +17,10 @@ const WK = 'WhatsApp Chat - Plataforma WK';
 const NOTAS = 'WhatsApp Chat - Notas pessoais';
 
 async function runFixture(chat: string, out: string): Promise<void> {
-  const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
+  const txt = fs.readFileSync(path.join(ROOT, 'fixtures', chat, '_chat.txt'));
   const files: Record<string, Uint8Array> = { [`${chat}/_chat.txt`]: txt };
   // Include the real media folder when present so renderers can resolve it.
-  const mediaDir = path.join(ROOT, 'data', chat);
+  const mediaDir = path.join(ROOT, 'fixtures', chat);
   if (fs.existsSync(mediaDir)) {
     for (const f of fs.readdirSync(mediaDir)) {
       if (f.startsWith('._') || f === '_chat.txt') continue;

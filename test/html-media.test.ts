@@ -10,7 +10,7 @@ const ROOT = process.cwd();
 const NOTAS = 'WhatsApp Chat - Notas pessoais';
 
 async function renderNotas(out: string): Promise<string> {
-  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  await runParser(path.join(ROOT, 'fixtures', `${NOTAS}.zip`), { out });
   const dir = path.join(out, slugifyChatName(NOTAS));
   return fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
 }

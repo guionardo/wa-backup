@@ -11,7 +11,7 @@ const NOTAS = 'WhatsApp Chat - Notas pessoais';
 
 test('html: theme toggle handled by a classic (non-module) script', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-theme-'));
-  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  await runParser(path.join(ROOT, 'fixtures', `${NOTAS}.zip`), { out });
   const dir = path.join(out, slugifyChatName(NOTAS));
   const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
 
@@ -37,7 +37,7 @@ test('transcript.js: theme toggle not double-bound in the module', () => {
 
 test('html: link color is theme-aware (visible in dark mode)', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-linkclr-'));
-  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  await runParser(path.join(ROOT, 'fixtures', `${NOTAS}.zip`), { out });
   const dir = path.join(out, slugifyChatName(NOTAS));
   const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
 
@@ -48,7 +48,7 @@ test('html: link color is theme-aware (visible in dark mode)', async () => {
 
 test('html: text/sender filter works from file:// (classic, non-module script)', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-filter-'));
-  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  await runParser(path.join(ROOT, 'fixtures', `${NOTAS}.zip`), { out });
   const dir = path.join(out, slugifyChatName(NOTAS));
   const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
 
@@ -71,7 +71,7 @@ test('transcript.js: search/sender no longer double-bound in the module', () => 
 
 test('html: long text/URLs wrap inside the bubble border (no overflow)', async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-wrap-'));
-  await runParser(path.join(ROOT, 'data', `${NOTAS}.zip`), { out });
+  await runParser(path.join(ROOT, 'fixtures', `${NOTAS}.zip`), { out });
   const dir = path.join(out, slugifyChatName(NOTAS));
   const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
 

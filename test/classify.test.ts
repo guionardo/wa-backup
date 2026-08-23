@@ -11,7 +11,7 @@ const ROOT = process.cwd();
 const CHAT = 'WhatsApp Chat - Notas pessoais';
 
 function parseSample(chat = CHAT): string[][] {
-  const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
+  const txt = fs.readFileSync(path.join(ROOT, 'fixtures', chat, '_chat.txt'));
   const zipped = zipSync({ [`${chat}/_chat.txt`]: txt });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-cls-'));
   const zipPath = path.join(tmp, 'export.zip');
@@ -116,7 +116,7 @@ test('Notas: every type value is one of the locked 8 (D-15)', async () => {
 
 test('Notas: author column is byte-for-byte the raw sender (D-09)', async () => {
   const src = fs
-    .readFileSync(path.join(ROOT, 'data', CHAT, '_chat.txt'), 'utf8')
+    .readFileSync(path.join(ROOT, 'fixtures', CHAT, '_chat.txt'), 'utf8')
     .split('\n');
   const records = await loadRecords();
 

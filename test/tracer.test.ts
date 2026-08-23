@@ -50,7 +50,7 @@ function parseCsv(text: string): string[][] {
 }
 
 function buildZip(chat: string): string {
-  const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
+  const txt = fs.readFileSync(path.join(ROOT, 'fixtures', chat, '_chat.txt'));
   const zipped = zipSync({ [`${chat}/_chat.txt`]: txt });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-backup-'));
   const zipPath = path.join(tmp, 'export.zip');
@@ -138,7 +138,7 @@ test('Plataforma WK: core rows extracted correctly', async () => {
 
   // Same-second burst: 5 distinct Gian Carlo photo rows.
   const gianSrc = fs
-    .readFileSync(path.join(ROOT, 'data', SAMPLES[0], '_chat.txt'), 'utf8')
+    .readFileSync(path.join(ROOT, 'fixtures', SAMPLES[0], '_chat.txt'), 'utf8')
     .split('\n')
     .find((l) => l.includes('00003046'))!;
   const gianAuthor = gianSrc.match(/\] (.+?):/)?.[1] ?? '';
@@ -173,7 +173,7 @@ test('Plataforma WK: core rows extracted correctly', async () => {
 
   // Raw bidi author preserved verbatim.
   const src = fs
-    .readFileSync(path.join(ROOT, 'data', SAMPLES[0], '_chat.txt'), 'utf8')
+    .readFileSync(path.join(ROOT, 'fixtures', SAMPLES[0], '_chat.txt'), 'utf8')
     .split('\n')
     .find((l) => l.includes('99951'))!;
   const rawAuthor = src.match(/\] (.+?): /)![1];

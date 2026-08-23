@@ -37,7 +37,7 @@ function parseCsv(text: string): string[][] {
 }
 
 async function run(chat: string, out: string): Promise<string[][]> {
-  const txt = fs.readFileSync(path.join(ROOT, 'data', chat, '_chat.txt'));
+  const txt = fs.readFileSync(path.join(ROOT, 'fixtures', chat, '_chat.txt'));
   const zipped = zipSync({ [`${chat}/_chat.txt`]: txt });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-int-'));
   const zipPath = path.join(tmp, 'export.zip');
@@ -87,7 +87,7 @@ test('Plataforma WK: authoritative end-to-end assertions', async () => {
   // Line 57 omitted; line 100 deleted; line 9 raw bidi author.
   assert.ok(records.some((r) => r[1] === 'omitted' && r[3].includes('sticker omitted')));
   assert.ok(records.some((r) => r[1] === 'deleted' && r[3] === 'Mensagem apagada'));
-  const src9 = fs.readFileSync(path.join(ROOT, 'data', WK, '_chat.txt'), 'utf8')
+  const src9 = fs.readFileSync(path.join(ROOT, 'fixtures', WK, '_chat.txt'), 'utf8')
     .split('\n').find((l) => l.includes('99951'))!;
   const rawAuthor = src9.match(/\] (.+?): /)![1];
   assert.ok(records.some((r) => r[0] === '2026-07-23T12:15:28' && r[2] === rawAuthor));
@@ -128,7 +128,7 @@ test('dedupe on re-run: second run adds 0 rows, count unchanged (D-16)', async (
   assert.equal(first.length, countAfterFirst);
 
   const addedSecond = await (async () => {
-    const txt = fs.readFileSync(path.join(ROOT, 'data', WK, '_chat.txt'));
+    const txt = fs.readFileSync(path.join(ROOT, 'fixtures', WK, '_chat.txt'));
     const zipped = zipSync({ [`${WK}/_chat.txt`]: txt });
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-int-zip-'));
     const zipPath = path.join(tmp, 'export.zip');
@@ -172,7 +172,7 @@ test('no phantom empty rows before media rows (both samples)', async () => {
 });
 
 test('G-01-16: root-level _chat.txt derives chat name from ZIP basename', async () => {
-  const txt = fs.readFileSync(path.join(ROOT, 'data', WK, '_chat.txt'));
+  const txt = fs.readFileSync(path.join(ROOT, 'fixtures', WK, '_chat.txt'));
   const zipped = zipSync({ '_chat.txt': txt }); // NO folder — real-export layout
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-root-'));
   const zipPath = path.join(tmp, 'WhatsApp Chat - Root Level.zip');

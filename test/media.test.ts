@@ -17,7 +17,7 @@ import {
 } from '../src/media';
 
 const ROOT = process.cwd();
-const NOTAS_ZIP = path.join(ROOT, 'data', 'WhatsApp Chat - Notas pessoais.zip');
+const NOTAS_ZIP = path.join(ROOT, 'fixtures', 'WhatsApp Chat - Notas pessoais.zip');
 
 test('normalizeMediaName: case + (1) + dash/space tolerance', () => {
   assert.equal(

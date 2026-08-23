@@ -2,425 +2,183 @@
 
 **Analysis Date:** 2026-08-23
 
-This document records technical debt, bugs, security issues, and fragile areas
-found while auditing a TypeScript/Node WhatsApp chat-export backup CLI. Files are
-referenced in backticks with line numbers where a claim depends on a specific spot.
+## Tech Debt
 
-The tool's headline promise is *"open your WhatsApp history years later, fully
-viewable, no account, no server."* Several findings below conflict with that
-promise (offline guarantees, data fidelity, and the safety of opening an
-untrusted backup in a browser).
+**[Broken distributed build — runtime-loaded browser JS not shipped]**
+- Issue: `src/render/html.ts:264` computes `jsPath` from `import.meta.url` and reads `js/transcript.js` at runtime via `fs.readFile`. `transcript.js` is loaded with `fs.readFile`, NOT imported as a module, so `tsup` (`tsup.config.ts`) never bundles or copies it into `dist/`. `package.json` publishes only `dist/`. Result: the published package throws `ENOENT: dist/render/js/transcript.js` whenever HTML rendering runs.
+- Files: `src/render/html.ts:264-265`, `tsup.config.ts:3-12`, `package.json:10-12,7`
+- Impact: `--inline` and any HTML output fails for all `npx wa-backup` / globally-installed users. Dev (`tsx`) and CI (`npm test` via tsx) never exercise the built artifact, so the bug is invisible in CI.
+- Fix approach: Either (a) `import transcriptSource from './js/transcript.js?raw'` style inline, (b) read the file content and embed it as a string constant in `html.ts`, or (c) add a tsup `onSuccess`/`publicDir` step (or a `cp` in `build`) that copies `src/render/js/*.js` to `dist/render/js/`. Option (b) is most robust and removes the runtime path coupling.
 
----
+**[Confusing `--no-fetch-titles` flag wiring]**
+- Issue: `src/index.ts:52` computes `noFetchTitles: Boolean((opts as Record<string, unknown>).noFetchTitles ?? (opts as Record<string, unknown>).fetchTitles === false)`. Commander's `.option('--no-fetch-titles')` already exposes `opts.fetchTitles` (default `true`, set `false` by the flag). The dual `??`/`=== false` expression is fragile and unreadable, and the `noFetchTitles` key never actually exists on `opts`.
+- Files: `src/index.ts:52`
+- Impact: Correct only by accident; any future refactor of the Commander option name silently disables title fetching or breaks the negation.
+- Fix approach: Use `noFetchTitles: opts.fetchTitles === false` (single source of truth) and drop the `noFetchTitles` key from `opts`.
 
-## Security Considerations
+**[Two divergent ZIP readers with different assumptions]**
+- Issue: `_chat.txt` is extracted via fflate streaming (`src/extract.ts:16-62`), while media is extracted via a hand-rolled central-directory parser (`src/media.ts:76-151`). The two code paths assume different ZIP layouts and are maintained separately.
+- Files: `src/extract.ts:16-62`, `src/media.ts:76-151`
+- Impact: A bug fixed in one reader is not automatically fixed in the other; the custom parser can rot if fflate behavior changes. Higher maintenance burden and inconsistent failure modes.
+- Fix approach: Document the intentional split (fflate mis-handles data-descriptor members on real exports — see `src/media.ts:67-74`) and add a shared fixture/contract test asserting both readers agree on offsets/sizes for the same archive.
 
-### 1. `unwrapUrl` trusts LinkedIn redirect target as an `href` → stored XSS (HIGH)
+**[Duplicated RFC-4180 CSV parser in tests]**
+- Issue: `test/integration.test.ts:17-37` re-implements the exact CSV parsing logic from `src/csv.ts:64-97` instead of importing `readCsv`.
+- Files: `test/integration.test.ts:17-37`, `src/csv.ts:64-97`
+- Impact: If the production parser changes (e.g., quoting edge cases), tests can pass while the real output is wrong, or vice-versa.
+- Fix approach: Import and reuse `readCsv` from `../src/csv` in the integration test.
 
-`src/render/js/linkify.js:53-68` decodes the `url` query parameter of a
-LinkedIn redirect wrapper and returns it verbatim as the "real" destination:
-
-```js
-const target = u.searchParams.get('url');
-if (!target) return url;
-return decodeURIComponent(target);
-```
-
-`URL_RE` (`src/render/js/linkify.js:5`) only ever matches `https?://…`, but
-`unwrapUrl` **replaces** the matched URL with the decoded redirect target. A
-chat message containing
-`https://linkedin.com/redir/redirect?url=javascript:alert(document.cookie)`
-produces, after unwrapping, `javascript:alert(document.cookie)`.
-
-That value is then placed directly into an `href` in both renderers:
-
-- Node HTML: `src/render/html.ts:129` / `:133` call `linkifyHtml`, which builds
-  `` `<a href="${href}" …>` `` (`src/render/js/linkify.js:88`) where
-  `href = escapeHtml(url)`. `escapeHtml` (`linkify.js:7-14`) escapes quotes but
-  **not** the URL scheme, so `href="javascript:alert(…)"` survives.
-- Browser viewer: `src/render/js/transcript.js:85` and `:104` assign
-  `linkifyHtml(…)` to `t.innerHTML`, so the malicious anchor is live in the DOM.
-
-Clicking the link executes script in the context of the opened HTML file. For a
-backup tool whose whole value is "open untrusted chat history later," this is a
-stored-XSS vector delivered through chat content.
-
-**Fix:** After decoding in `unwrapUrl`, validate the scheme and host; reject
-anything not `http(s)` and re-encode. e.g. only return the target if
-`new URL(target)` succeeds and `protocol` is `http:`/`https:`. Also consider
-enforcing `escapeHtml` to drop non-`http(s)` schemes defensively.
-
-### 2. Markdown renderer can emit non-`http(s)` link targets (MEDIUM)
-
-`linkifyMarkdown` (`src/render/js/linkify.js:96-113`) builds
-`` `[${title}](${safeUrl})` ``. `safeUrl` only escapes `\` and `)`; a
-`javascript:` scheme from the same `unwrapUrl` path passes through. Many Markdown
-viewers (and any HTML-rendered Markdown) will turn this into a clickable,
-executable link. Same root cause as #1.
-
-### 3. Fetched page titles are trusted into HTML after only length/control-char cleaning (LOW, currently mitigated)
-
-`extractTitle` (`src/title.ts:43-49`) runs `cleanTitle` (`src/title.ts:13-19`)
-which strips control chars and truncates to 300 chars but does **not** HTML-escape.
-The title is later escaped by `linkifyHtml` (`src/render/js/linkify.js:83`), so
-the current pipeline is safe. **Risk:** this safety depends on every call site
-passing the title through `escapeHtml`. Any future call site that interpolates
-a fetched title directly would reintroduce XSS. Recommend centralizing title
-escaping inside `extractTitle` or documenting the invariant loudly.
-
-### 4. External favicon loads defeat the "standalone / offline" guarantee (MEDIUM, privacy)
-
-The HTML viewer and the Node renderer both inject a favicon `<img>` per link:
-
-- `src/render/js/linkify.js:86` → `<img class="favicon" src="${escapeHtml(fav)}" …>`
-- `src/render/html.ts:127` passes `icon = (u) => faviconFor(u)`, and
-  `faviconFor` (`src/render/js/linkify.js:116-122`) returns
-  `https://<host>/favicon.ico`.
-
-Every link in the backup thus triggers a network request to the linked site
-when the HTML is opened — leaking the viewer's IP to third parties and breaking
-offline viewing. There is no `<meta http-equiv="Content-Security-Policy">` to
-block it, and no opt-out flag. For a tool marketed as self-contained, this is a
-privacy/design conflict.
-
-**Fix:** Make favicons opt-in (`--favicons`), default off, and/or inline a
-neutral placeholder. Add a CSP `img-src 'self' data:` meta tag to the HTML.
-
-### 5. `mediaPath` assigned to `img.src` without validation (LOW)
-
-`src/render/js/transcript.js:91` sets `img.src = m.mediaPath` directly from the
-JSON island. `mediaPath` is built by the renderer from on-disk filenames, so it
-is not attacker-controlled today, but it is assigned without escaping/validation
-and would break (or behave oddly) if a media filename ever contained characters
-that need encoding in a URI.
-
----
-
-## Performance Bottlenecks
-
-### 6. Full HTTP response body buffered into memory during title fetch (HIGH vs. project's memory-safety mandate)
-
-The project explicitly mandates streaming/memory-safe parsing (PARSE-02). Title
-fetching violates this:
-
-- `fetchHtmlTitle` (`src/title.ts:161-167`) and `fetchMediumTitle`
-  (`src/title.ts:120-129`) call `await res.text()` with **no** size cap,
-  `Content-Length` check, or truncation. A linked page that returns a 200 MB HTML
-  body (or an infinite/streaming response) is fully buffered in RAM.
-- `youTubeOembedUrl`/`parseYouTubeOembed`, `redditJsonUrl`/`parseRedditJson`,
-  `stackExchangeApiUrl`/`parseStackOverflowJson` all `await res.json()` — again
-  unbounded.
-
-A single oversized or malicious page can OOM the process, which is especially
-bad because the CLI's default is to fetch titles (see #8).
-
-**Fix:** Cap `Content-Length` (e.g. reject >1–2 MB), stream-truncate the body,
-and/or abort on size. At minimum, check `res.headers.get('content-length')`
-before reading.
-
-### 7. `reconcileMedia` extracts all media with unbounded concurrency (MEDIUM)
-
-`src/media.ts:197-211` pushes one `extractEntry` promise per matched ref and
-`await Promise.all(writes)`. `extractEntry` (`src/media.ts:123-151`) opens a file
-handle + read stream per call. For an export with hundreds of media files this
-opens that many simultaneous handles and read streams, risking `EMFILE`/resource
-exhaustion. Bounded worker pool (like `enrichTitles` already uses, concurrency 8)
-would be consistent and safer.
-
-### 8. Title fetching is the default and re-fetches every run (MEDIUM)
-
-`src/model.ts:113-121` calls `enrichTitles(merged, { enabled: !opts.noFetchTitles, … })`
-with **no caching of previously fetched titles**. `merged` is read back from the
-CSV (which *does* store `urlTitles`), but `enrichTitles`
-(`src/title.ts:260-316`) ignores any existing `urlTitles` in the messages and
-re-fetches every unique URL each run (8-way parallel, 5 s timeout each,
-`src/title.ts:185`/`:282`). Re-running the tool re-hits the network for the same
-links every time — slow, and a hard failure mode when offline or behind a
-firewall (the tool is positioned as an offline archive). The persisted CSV is
-effectively not reused for titles.
-
-**Fix:** Skip re-fetch when `m.urlTitles[u]` already exists; only fetch missing
-keys. Make `--no-fetch-titles` the safe default, or at least cache.
-
----
+**[Redundant `open()` in per-entry media extraction]**
+- Issue: `src/media.ts:123-151` opens the ZIP file separately (`open(zipPath)`) for every entry just to read the 30-byte local header, then opens a second `createReadStream` on the same path. N media entries → 2N file opens.
+- Files: `src/media.ts:128-139`
+- Impact: Inefficient on exports with hundreds of media files; measurable wall-clock cost, not a correctness bug.
+- Fix approach: Reuse a single opened file handle across all entries in `reconcileMedia`, or trust the central-directory offset and skip the local-header re-read.
 
 ## Known Bugs
 
-### 9. Duplicate media filenames are silently conflated (HIGH, data loss)
+**[HTML render reads `transcript.js` by relative path — fails in published build]**
+- See Tech Debt above. This is both debt and a shipping bug; severity HIGH.
+- Symptoms: `Error: ENOENT: no such file or directory, open '.../dist/render/js/transcript.js'` from `renderHtml`.
+- Trigger: Any run that produces `messages.html` using a built (non-tsx) install, e.g. `npm i -g wa-backup` or `npx`.
+- Workaround: Run via `npm run dev` / `tsx src/index.ts` (source present).
 
-`normalizeMediaName` (`src/media.ts:24-26`) lowercases, drops a trailing
-`(N)` duplicate marker, and collapses whitespace/`-`/`_`:
+**[`isInlineable`/inline path reads whole file into memory]**
+- `src/render/html.ts:64-79` `readFileAsDataUri` calls `fs.readFile` on the full file and base64-encodes it. Bounded by `INLINE_MAX_BYTES = 8MB` (`src/media.ts:13`), so a single file ≤ 8MB is fine, but many inlineable files are each fully buffered and concatenated into one HTML string in memory before write.
+- Files: `src/render/html.ts:64-79`, `src/media.ts:13,51-53`
+- Impact: `--inline` on a chat with many photos can spike memory (N × 8MB) during HTML string assembly; not constant-memory despite the streaming claim.
+- Fix approach: Stream each media file as a chunk into the write stream, or cap total inline budget, or document the memory ceiling.
 
-```ts
-return s.toLowerCase().replace(/\(\d+\)/g, '').replace(/[\s_-]+/g, '');
-```
+**[No CRC / integrity check on extracted media]**
+- `src/media.ts:123-151` inflates/copies bytes but never verifies the stored CRC-32 against the central-directory value.
+- Impact: Corrupt archives produce silently corrupted media with no error.
+- Fix approach: Validate CRC (fflate exposes it via the central record) and warn on mismatch.
 
-Two genuinely distinct WhatsApp files `photo.jpg` and `photo (1).jpg` both
-normalize to `photojpg`. In `readCentralDirectory`'s index
-(`src/media.ts:186-193`) the later entry **overwrites** the earlier
-(`index.set(normalizeMediaName(base), e)`), so one of the two files is lost and
-the surviving file is written for both refs. The same collision happens for the
-very common `IMG-2020-WA0001.jpg` vs `IMG_2020_WA0001.jpg` style variants.
+## Security Considerations
 
-Impact: media silently missing or wrong in the backup. The `(1)` marker is
-exactly how WhatsApp disambiguates duplicate exports.
+**[Unescaped `style` attribute is fed a derived-but-author-derived value]**
+- `src/render/html.ts:114,120,138-140` inject `getAccentColor(first.author)` into `style="color:${accent}"` / `style="background:${accent}"`. `accent` is `escapeHtml(getAccentColor(...))` and `getAccentColor` returns a fixed `hsl(...)` string (`src/render/colors.ts:16-18`), so currently safe. However, the escaping is applied to the *color*, not the *author*, and the author is separately escaped — the pattern is easy to break in a future edit (e.g., injecting author directly into a style attribute).
+- Files: `src/render/html.ts:114,120,140`, `src/render/colors.ts:16-18`
+- Current mitigation: color value is a constant-format HSL string, no user input reaches the style attribute unescaped.
+- Recommendations: Centralize a `styleAttr` helper that only accepts known-safe CSS values; never interpolate message-derived strings into `style=`.
 
-**Fix:** Do not strip `(N)`; keep it as a distinguisher, or key the index by the
-*original* filename and match refs case/separator-insensitively only when no
-exact match exists.
+**[XSS escaping is generally sound but relies on consistent `escapeHtml` use]**
+- `src/render/html.ts:11-18`, `src/render/js/linkify.js:7-14`, and the `</` guard at `src/render/html.ts:262` are correct. The browser-side `transcript.js` renders message text via `linkifyHtml` into `innerHTML` (`src/render/js/transcript.js:85,104`) — `linkifyHtml` escapes the non-URL text and the URL `href`, so this is safe for standard chat content.
+- Risk: Any future change that assigns raw `m.text` to `innerHTML` (e.g., a "rich text" feature) reintroduces XSS. The `xss-sanitize.js` module (`src/render/js/xss-sanitize.js`) documents the `textContent`-only rule but is not actually used for body text (linkify is). The safe pattern is enforced by convention, not enforced by code.
+- Recommendations: Add a lint rule / test fixture asserting `<script>`/`<img onerror>` in chat text appears escaped in both `messages.html` and the JSON island.
 
-### 10. `unwrapUrl` scheme confusion also enables `data:` URIs in href (see #1)
+**[SSRF / arbitrary outbound fetch from chat content]**
+- `src/title.ts:181-252` `fetchTitle` fetches every `http(s)` URL found in message bodies, including potentially internal/link-local addresses (`http://169.254.169.254/...` cloud metadata, `http://localhost`, RFC1918). There is no URL allowlist or private-IP block.
+- Files: `src/title.ts:181-252`, `src/title.ts:282-302` (enrichTitles workers)
+- Current mitigation: `timeoutMs` 5s default (`src/title.ts:185`) and bounded concurrency 8 (`src/title.ts:282`); failures fall back to a derived title.
+- Recommendations: Block non-public IP ranges before fetching; allow disabling network entirely by default (opt-in `--fetch-titles`); add a `file:`/`internal` URL guard.
 
-Already covered as the primary XSS, but worth noting it is a *bug* in trust
-modeling, not just a hardening gap: the function assumes a LinkedIn redirect
-target is a safe outbound link.
+**[Cookie/auth leakage via fake User-Agent]**
+- `src/title.ts:7-9,124,162` sends a spoofed browser `User-Agent` to arbitrary third-party sites, which may set cookies / track the user.
+- Impact: Low for a local personal tool, but it makes requests that look like a real browser and can receive `Set-Cookie`.
+- Recommendations: Document the behavior; consider a distinctive `wa-backup/1.0` UA and honoring `robots`/privacy expectations.
 
-### 11. Lab example scripts contain copy-paste bugs and unused deps (LOW, but misleading)
+## Performance Bottlenecks
 
-The `lab/` folder holds throwaway prototypes that diverge from `src/title.ts`
-and are **not** wired into the build:
+**[Non-strict backpressure in line streaming]**
+- `src/extract.ts:73-110` `readLines` buffers lines in an in-memory array when the producer (fflate inflate) outpaces the consumer (`parseMessages`). For pathological archives (huge `_chat.txt` with very fast decompression) the buffer can grow unbounded before parsing catches up.
+- Files: `src/extract.ts:73-110`, `src/parse/message.ts:164-177`
+- Cause: The queue/promise bridge doesn't apply backpressure to the upstream `createReadStream`.
+- Improvement path: Pipe through an explicit `Readable`/`AsyncIterator` with bounded high-water mark, or consume lines inside the inflate callback.
 
-- `lab/title_stackoverflow.js:7` builds
-  `` `https://stackexchange.com{questionId}?site=stackoverflow` `` — literal
-  `{questionId}` braces, never interpolated. Would 404.
-- `lab/title_youtube.js:4` builds
-  `` `https://youtube.com{encodeURIComponent(videoUrl)}` `` — same literal-brace
-  bug.
-- `lab/title_medium.js:1-2` `require('axios')` / `require('cheerio')` — **neither
-  is a dependency** (`package.json` lists only `commander`, `date-fns`,
-  `fflate`, `picocolors`). These scripts cannot run as-is and misrepresent the
-  real, dependency-free implementation in `src/title.ts`.
-- `lab/title_x.js` `parseTwitterUrl('https://x.com')` returns
-  `{ username: 'NASA', type: 'tweet', id: '…' }` for a bare domain — wrong, and
-  does not match `deriveXTitle` in `src/title.ts:146-158`.
+**[Whole-file buffering for `--inline`]**
+- See Known Bugs: `readFileAsDataUri` (`src/render/html.ts:64-79`). Memory scales with the number of inlineable media files, not constant per the project's memory-safety constraint (PROJECT.md "must stream-parse").
 
-Risk: a maintainer copying from `lab/` reintroduces these bugs. Recommend
-deleting `lab/` or moving it clearly out of the shipped tree.
-
----
-
-## Tech Debt
-
-### 12. `escapeHtml` is duplicated in three places (MEDIUM, drift risk)
-
-- `src/render/js/linkify.js:7-14`
-- `src/render/html.ts:11-18`
-- `escapeMd` (different — only `& < >`) at `src/render/md.ts:31-37` and
-  `src/render/js/linkify.js:16-21`
-
-The two full `escapeHtml` copies must be kept byte-identical. A fix applied to
-one (e.g. adding quote handling) and not the other reopens XSS. Extract a single
-shared escaper.
-
-### 13. Self-author / "most frequent author" logic duplicated (LOW)
-
-- `src/render/html.ts:82-97` `pickSelfAuthor`
-- `src/render/js/transcript.js:178-193` `mostFrequent`
-
-Identical algorithm, two implementations. Keep one.
-
-### 14. Accent-color / initials duplicated across Node and browser (LOW)
-
-`getAccentColor`/`initials` in `src/render/colors.ts` + `src/render/html.ts` vs
-`accentColor`/`initials` in `src/render/js/transcript.js:16-34`. The browser
-variant uses `crypto.subtle` (async) while the Node variant presumably uses a
-hash; divergence in hue assignment between the static HTML and the viewer is
-possible.
-
-### 15. `chatNameFromZip` and `chatInfoFromZip` are near-identical (LOW)
-
-`src/extract.ts:151-170` and `src/extract.ts:177-199` repeat the same
-"stream ZIP, collect entry names, resolve name/slug" logic. Consolidate.
-
-### 16. `enrichTitles` re-implements URL extraction that `linkify` already owns (LOW)
-
-`src/title.ts:274-280` re-runs `URL_RE` and `unwrapUrl` to build the unique-URL
-list, duplicating logic in `src/render/js/linkify.js`. If `URL_RE` or
-`unwrapUrl` semantics change, the two can drift (e.g. a title fetched for a URL
-that the renderer later splits differently).
-
----
+**[Per-entry file open in media reconcile]**
+- See Tech Debt: `src/media.ts:128`. Adds latency proportional to media count.
 
 ## Fragile Areas
 
-### 17. Locale / date-order detection is a heuristic with a hard pt-BR bias (HIGH for non-BR exports)
+**[Locale / date-format auto-detection is the hardest feature and the least tested]**
+- `src/parse/timestamp.ts:92-131` `detectFormat` votes over the first ≤50 sampled lines; `src/parse/message.ts:65,164-184` re-samples the first 200 lines in-stream. The decision is global per-file.
+- Why fragile: Only works when the export is internally consistent. Mixed/concatenated exports, Android `dd/mm/yy, hh:mm am` format, English locales, and 12-hour AM/PM detection (the `is12h` branch at `src/parse/timestamp.ts:159-162`) have little to no test coverage (see Test Coverage Gaps). A wrong day/month vote silently misdates every message.
+- Safe modification: Any change to `TS_RE` (`src/parse/timestamp.ts:32-33`) or the vote logic MUST be accompanied by the synthetic fixtures in `scripts/generate-fixtures.mjs` being extended with the new format, plus a round-trip assertion.
 
-`detectFormat` (`src/parse/timestamp.ts:92-131`) decides day/month order by a
-majority vote over the first ~50 ambiguous timestamped lines, **defaulting to
-day-first on a tie** (the pt-BR assumption, "A2"). Problems on real-world
-exports:
+**[Magic-string day-pill detection in HTML render]**
+- `src/render/html.ts:205` identifies a day marker by `item.length === 10 && item[4] === '-'` (ISO date shape), then re-wraps it. Any change to day formatting breaks transcript layout silently.
+- Files: `src/render/html.ts:195-211`
+- Safe modification: Tag day markers explicitly (e.g., wrap in an object/`{day}` sentinel) instead of a string-length heuristic.
 
-- A US (`mm/dd`) export whose first 50 ambiguous lines happen to balance or skew
-  toward day-first will be misparsed → wrong dates, silent.
-- The vote only counts lines where *both* parts are ≤ 12; an export that starts
-  with unambiguous dates (e.g. `13/05`) contributes nothing, so detection leans
-  on a small sample.
-- `dayPill`/`renderDayPill` and `src/render/md.ts:10-21` hard-code
-  `Intl.DateTimeFormat('pt-BR', …)`. Non-Brazilian exports get Portuguese day
-  labels regardless of detected locale.
-- `--day-first` / `--month-first` opt-outs exist (`src/index.ts:18-19`) but are
-  not auto-applied; a wrong automatic guess has no auto-correction.
+**["Outgoing" side inferred by message plurality]**
+- `src/render/html.ts:82-97` `pickSelfAuthor` and `src/render/js/transcript.js:178-193` `mostFrequent` choose the most frequent author as the export owner ("outgoing"). In group chats or unevenly-participated 1:1 chats this mislabels senders (e.g., a business account that mostly receives messages).
+- Files: `src/render/html.ts:82-97`, `src/render/js/transcript.js:178-193`
+- Impact: Cosmetic (bubble alignment/color) but can be misleading for backups meant as a faithful record.
+- Safe modification: Prefer the chat's own phone/owner if exported, or surface the choice; do not assume plurality.
 
-**Fix:** Persist the detected format alongside the CSV (it already stores
-per-message ISO, so re-renders can't fix a bad parse). Surface detection
-confidence in the verbose report and fail loudly / prompt when the sample is
-too small.
-
-### 18. `TS_RE` is rigid about timestamp placement and separators (MEDIUM)
-
-`src/parse/timestamp.ts:32-33`:
-
-```ts
-/^\[?(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),?\s(\d{1,2}):(\d{2})(?::(\d{2}))?\s?(am|pm|AM|PM)?\]?/
-```
-
-- Requires the timestamp at the very start of the line after invisible-stripping.
-  Any export variant with a leading space, a different bracketing, or
-  locale-specific separators (e.g. `。` or spaces around `/`) will not match and
-  the line becomes a continuation, **silently dropping the message's timestamp**
-  (it merges into the previous message's text).
-- Anchored `^` means a timestamp appearing after other prefix text is missed.
-- Only `am|pm` is recognized for 12h; localized "a.m."/"p.m." or other languages
-  are not.
-- Two-digit years resolved by `resolveYear`
-  (`src/parse/timestamp.ts:70-74`): `yy <= cur-2000+1 ? 2000+yy : 1900+yy`. With
-  `cur=2026`, `yy=28` → `1928`, and `yy=00` → `2000`. A genuinely old export
-  (pre-2009) is clipped by `SANITY_MIN_YEAR = 2009`
-  (`src/parse/timestamp.ts:66`) and dropped as a continuation.
-
-### 19. `tryParseTimestamp` drops out-of-range/invalid dates as continuations (MEDIUM)
-
-`src/parse/timestamp.ts:167-175` returns `null` for `year < 2009`,
-`year > cur+1`, or non-existent calendar dates (`31/02`). Those lines are then
-treated as continuations of the prior message (`src/parse/message.ts:112-117`),
-so the text gets silently appended to the wrong message and the real message row
-is lost. For a backup tool, silent data loss on edge-case dates is high-impact.
-A wrong system clock alone can swallow an entire day.
-
-### 20. Parser state machine buffers the sample window before emitting (LOW)
-
-`src/parse/message.ts:164-184` holds up to `SAMPLE_LINES = 200`
-(`src/parse/message.ts:65`) lines in `buffer` until detection resolves, then
-re-processes. This is a small bounded buffer (fine for memory) but means the
-first 200 lines are parsed twice and any continuation logic must stay consistent
-across the two passes — a subtle place for bugs if the state machine evolves.
-
----
+**[`classifyFromFilename` has no `audio` type]**
+- `src/parse/message.ts:26-33` maps anything containing AUDIO's filename tokens to `document` because the locked 8-type `MessageType` (`src/parse/types.ts:1-9`) has no `audio`. WhatsApp voice notes (`PTT`) are common and will render as a generic document link.
+- Impact: Voice messages lose their semantic type; no playback affordance.
+- Fix approach: Extend `MessageType` with `audio` and update `MEDIA_ICON` (`src/render/html.ts:20-26`, `src/render/js/transcript.js:8-14`).
 
 ## Scaling Limits
 
-### 21. Manual ZIP central-directory parse is 32-bit only (ZIP64 unsupported) (HIGH for large exports)
+**[No ZIP64 support in custom central-directory reader]**
+- `src/media.ts:76-114` reads 32-bit `cdOffset`/`cdSize`/`compressedSize`/`cdCount`. Archives >4 GB, >65,535 entries, or with Zip64 EOCD are unsupported and will throw "ZIP end-of-central-directory record not found" or parse incorrectly.
+- Files: `src/media.ts:76-114`
+- Current capacity: Standard WhatsApp exports (typically <2 GB) are fine.
+- Scaling path: Detect the Zip64 EOCD signature (`0x06064b50`) and read 64-bit fields, or delegate media extraction back to fflate once its data-descriptor bug is resolved.
 
-`readCentralDirectory` (`src/media.ts:76-114`) reads offsets/sizes/counts with
-`readUInt32LE` (`src/media.ts:91-105`) and `readUInt16LE`
-(`src/media.ts:92-93`). It does **not** consult the ZIP64 extra field or the
-ZIP64 EOCD locator. Consequences:
-
-- Exports where the central directory offset, any entry compressed size, or the
-  entry count exceeds 32-bit / 65535 limits will be misread → wrong media
-  extracted or `ENOENT`/truncation.
-- Long-lived chats with many videos routinely exceed 4 GB; this is a real ceiling
-  for the tool's stated use case.
-
-**Fix:** Either detect ZIP64 and bail with a clear error, or use a ZIP library
-that supports it for the central-directory pass.
-
-### 22. `extractEntry` assumes `compressedSize` from central dir is authoritative (MEDIUM)
-
-`src/media.ts:135-138` opens `createReadStream(zipPath, { start, end })` using
-`entry.compressedSize` from the central directory. This is usually correct, but
-if an entry was written with a *streaming data descriptor* where some
-implementations store `0` in the central `csize`, the read window is empty/wrong.
-The code's own comment (`src/media.ts:67-75`) acknowledges fflate mis-handles
-this, which is why the manual pass exists — but nothing validates that the
-central `csize` is non-zero before slicing the stream. A zero `compressedSize`
-yields `end < start` and a broken read.
-
-### 23. `INLINE_MAX_BYTES = 8 MB` cap is per-file but total HTML can balloon (LOW)
-
-`src/media.ts:13` caps each inlined file, but `--inline` embeds *every*
-inlineable media as a `data:` URI directly in `messages.html`
-(`src/render/html.ts:64-79`). A chat with 200 photos inlines ~1.6 GB into one
-HTML file — opens slowly or not at all in browsers. The "single self-contained
-file" promise collides with practical browser limits.
-
----
+**[SAMPLE_LINES upper bound on format detection]**
+- `src/parse/message.ts:65` buffers up to 200 lines before detection; `detectFormat` samples ≤50. Files shorter than the ambiguity threshold, or with all-ambiguous dates beyond the sample window, fall back to the day-first assumption (`src/parse/timestamp.ts:127`).
+- Limit: A very long export whose first 200 lines are system messages (no parseable timestamps) defers detection until line 200; acceptable but worth noting.
 
 ## Dependencies at Risk
 
-### 24. `fflate` streaming is worked around, not relied upon, for media (LOW)
+**[`fflate` 0.8.3 — data-descriptor bug drives the custom media parser]**
+- The custom central-directory parser in `src/media.ts` exists *because* fflate's streaming inflate mis-handles members stored with a data descriptor (`src/media.ts:67-74`). This is a known upstream limitation, not a pinned-version risk, but it means the project can never fully delete its second ZIP reader.
+- Risk: If fflate is upgraded and the bug is fixed, the custom parser becomes dead weight; if fflate is kept, the custom parser must be maintained forever.
+- Migration plan: Add a regression test with a data-descriptor inner-zip; if fflate ever handles it, switch `reconcileMedia` to fflate and delete `readCentralDirectory`.
 
-`src/extract.ts:16-62` uses fflate's `Unzip` for the chat text (correct,
-streaming), but `src/media.ts` bypasses fflate entirely with a hand-rolled
-central-directory reader + raw `zlib.createInflateRaw`. This split means media
-extraction depends on fragile manual parsing (see #21/#22) while fflate — the
-chosen "memory-safe" dependency — is only used for the text path. The stated
-rationale (fflate mis-handles data-descriptor members) is sound but leaves the
-most failure-prone code as custom parsing.
-
-### 25. `date-fns` used only for `format` (LOW)
-
-`src/parse/timestamp.ts:1` imports `format` from `date-fns` solely to render the
-ISO string (`src/parse/timestamp.ts:178`). The whole `date-fns` dependency could
-be replaced with a tiny hand-rolled formatter, reducing the dependency surface —
-or expanded to actually localize output (currently pt-BR is hard-coded, #17).
-
----
+**[`date-fns` 4.4.0 — only used for `format`]**
+- `src/parse/timestamp.ts:1` imports `format` from `date-fns` solely to render ISO strings (`src/parse/timestamp.ts:178`). A hand-rolled `format` would drop a runtime dependency.
+- Impact: Minor; low risk. Noted for footprint reduction.
 
 ## Missing Critical Features
 
-### 26. No re-render safety / format persistence (MEDIUM)
+**[No CLI-supplied chat owner / "self" identity]**
+- The tool cannot be told who the export belongs to; "outgoing" is guessed (`src/render/html.ts:82-97`). A backup intended as a personal record should let the user assert ownership.
+- Blocks: Correct outgoing/incoming styling in groups; future multi-chat merge.
 
-Renderers read `messages.csv` and re-derive everything, but the *detected date
-format* and *locale* are not stored. If detection guessed wrong (#17), every
-future re-render reproduces the wrong dates with no way to correct without
-re-parsing the ZIP. Persisting `Detection` (dayFirst/is12h) next to the CSV would
-make corrections sticky.
+**[No re-render without network]**
+- `renderOutputs` (`src/model.ts:69-81`) re-reads CSV and is offline-safe, but title enrichment (`src/model.ts:113-121`) rewrites the CSV on every run and will re-fetch if titles are empty. There is no `--offline` render path that preserves already-fetched titles without touching network.
+- Blocks: Reproducible/offline archival.
 
-### 27. No validation that the opened HTML is safe to view (LOW)
-
-Beyond the CSP gap (#4), there is no integrity/sandboxing. The HTML is a
-`file://` document with embedded third-party `<img>` favicons and, via #1,
-potentially `javascript:` links. A "view your backup" tool should at minimum ship
-with a strict CSP meta tag.
-
----
+**[No ZIP integrity / media CRC validation]**
+- See Known Bugs. Missing for a "faithful backup" tool.
 
 ## Test Coverage Gaps
 
-### 28. `unwrapUrl` scheme-validation is untested (HIGH)
+**[Synthetic fixtures cover only iOS pt-BR, dd/mm/yyyy]**
+- `scripts/generate-fixtures.mjs` and all `test/*.test.ts` exercise a single locale/format (iOS-bracketed, day-first, 4-digit year, pt-BR). The hardest subsystem — locale/format auto-detection — is effectively untested against:
+  - Android format (`dd/mm/yy, hh:mm` without brackets, possible `am`/`pm`)
+  - English / other locales
+  - 12-hour AM/PM detection path (`src/parse/timestamp.ts:159-162`)
+  - Mixed or concatenated exports
+  - 2-digit year sliding-window edge (`src/parse/timestamp.ts:70-74`, year `00`/`99`)
+- Files: `scripts/generate-fixtures.mjs`, `test/timestamp.test.ts`, `test/integration.test.ts`
+- Risk: A regression in `detectFormat`/`tryParseTimestamp` would not be caught; mis-dated messages ship silently.
+- Priority: HIGH.
 
-`test/linkify.test.ts` (183 lines) exercises `linkifyHtml`/`linkifyMarkdown`/
-`deriveTitle`/`faviconFor` but there is **no test** asserting that a LinkedIn
-redirect wrapping `javascript:`/`data:` is rejected. The XSS in #1 would pass
-today's suite. Add tests proving non-`http(s)` unwrapped targets are dropped.
+**[CI runs tests against source (`tsx`), never the built `dist/`]**
+- `package.json:39` `test` uses `tsx`; the `verify` job runs lint/test/build but never executes the built `dist/index.js` end-to-end. This is exactly why the `transcript.js` shipping bug (above) is latent.
+- Risk: Build/runtime-path regressions (asset copying, `import.meta.url`, shebang) are not caught before publish.
+- Priority: HIGH.
+- Fix approach: Add a CI step that runs `node dist/index.js` against a fixture and checks `messages.html` (and presence of the embedded JS) is produced.
 
-### 29. Media duplicate-collision untested (HIGH)
+**[No HTML XSS regression fixture]**
+- There is no test asserting that `<script>`/`<img onerror>` in chat text is escaped in `messages.html` or the JSON island. See Security.
+- Priority: MEDIUM.
 
-`test/media.test.ts` (190 lines) likely tests happy-path reconciliation but not
-the `photo.jpg` vs `photo (1).jpg` collision from #9. Add a case with two
-distinct files that normalize to the same key and assert both survive distinctly.
+**[No ZIP64 / large-archive test]**
+- `media.test.ts` uses tiny placeholder bytes (`scripts/generate-fixtures.mjs: PLACEHOLDER` = 8 bytes). No test exercises a real DEFLATE member, a data-descriptor member, or a >4GB/Zip64 archive.
+- Priority: MEDIUM.
 
-### 30. Title fetch size/abort behavior untested (MEDIUM)
-
-`test/title.test.ts` (386 lines) is the largest suite and covers platform
-dispatch, but there is no test for: (a) a response larger than a size cap,
-(b) a non-HTML `content-type` being rejected (covered by `ct` check but worth an
-explicit case), or (c) `res.text()` memory growth. Given #6, add a streaming/size
-guard test.
-
-### 31. Locale detection on non-pt-BR / ambiguous samples untested (MEDIUM)
-
-No test asserts behavior when the first 50 ambiguous lines tie, or when an
-export is `mm/dd` but the sample skews day-first. Given #17/#18, add
-`detectFormat` edge-case tests (including the tie→day-first default and a
-US-style export that should be month-first).
-
-### 32. ZIP64 / >65535 entries untested (MEDIUM)
-
-`test/media.test.ts` uses small fixtures; the 32-bit ceiling (#21) is unexercised.
-Add a generated large/sparse ZIP or a unit test on `readCentralDirectory` with a
-ZIP64-flagged entry asserting a clear error rather than silent misread.
+**[No negative/error-path tests for malformed ZIP]**
+- `src/media.ts:90` throws on missing EOCD; `src/extract.ts:57` rejects on missing `_chat.txt`. Neither failure path is covered by tests.
 
 ---
 

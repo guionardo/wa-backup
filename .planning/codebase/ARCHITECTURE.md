@@ -6,245 +6,246 @@
 ## System Overview
 
 ```text
-┌───────────────────────────────────────────────────────────────────────────┐
-│  CLI entry — `src/index.ts` (commander)                                    │
-│  buildCli().parseAsync() → program.action → runParser()                    │
-└───────────────────────────────┬───────────────────────────────────────────┘
-                                  │ zip path + RunOptions
-                                  ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Orchestrator — `src/model.ts` : runParser()                                │
-│  (the vertical pipeline; returns message count, drives side-effects)      │
-└───────┬───────────┬──────────────┬───────────────┬────────────────────────┘
-        │           │              │               │
-        ▼           ▼              ▼               ▼
-┌──────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
-│ Extraction   │ │ Parsing  │ │ Enrich-  │ │ Media         │
-│ `extract.ts` │ │ `parse/*`│ │ `title.ts`│ │ `media.ts`    │
-│ stream ZIP → │ │ line SM  │ │ fetch URL│ │ reconcile +   │
-│ _chat.txt    │ │ →Message │ │ titles   │ │ buildMediaMap │
-│ lines        │ │ []       │ │          │ │               │
-└──────┬───────┘ └────┬─────┘ └────┬─────┘ └───────┬──────┘
-       │             │            │               │
-       └─────────────┴────────────┴───────────────┘
-                     │  merge into
-                     ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Source-of-truth — `src/csv.ts` : messages.csv (UTF-8, no BOM)             │
-│  columns: timestamp_iso,type,author,text,media,url_titles                  │
-└───────────────────────────────┬───────────────────────────────────────────┘
-                                 │  readCsv() — re-read from disk
-        ┌────────────────────────┼────────────────────────┐
-        ▼                        ▼                         ▼
-┌──────────────┐        ┌──────────────┐        ┌──────────────┐
-│ `render/     │        │ `render/md.ts`│        │ `render/      │
-│  json.ts`    │        │              │        │  html.ts`     │
-│ buildEnvelope│        │ day-sectioned│        │ WhatsApp-like  │
-│              │        │ log          │        │ bubbles + JS   │
-└──────────────┘        └──────────────┘        └──────────────┘
-        │                        │                         │
-        ▼                        ▼                         ▼
- messages.json            messages.md               messages.html  (all under <out>/<slug>/)
+┌────────────────────────────────────────────────────────────────────┐
+│  CLI entry — `src/index.ts` (commander)                              │
+│  buildCli() -> .action() -> runParser(zip, opts)                     │
+└──────────────────────────┬─────────────────────────────────────────┘
+                           │ zipPath, RunOptions
+                           ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Orchestrator — `src/model.ts` runParser()                          │
+│  (1) chatInfoFromZip  (2) extractChatTxt  (3) parseMessages         │
+│  (4) mergeCsv         (5) enrichTitles      (6) reconcileMedia      │
+│  (7) renderOutputs                                              `model.ts` │
+└───┬───────────┬───────────────┬───────────────┬───────────────────┘
+    │           │               │               │
+    ▼           ▼               ▼               ▼
+┌────────┐ ┌─────────────┐ ┌──────────┐ ┌──────────────┐
+│ extract│ │  parse/*    │ │ csv.ts   │ │ media.ts     │
+│ `extract.ts`│ │ `message.ts` │ │`csv.ts`  │ │ `media.ts`     │
+│         │ │ `timestamp`│ │          │ │               │
+│         │ │ `types.ts` │ │          │ │               │
+└────────┘ └─────────────┘ └────┬─────┘ └───────┬───────┘
+                                │               │
+                                ▼               ▼
+                ┌───────────────────────────────────────────────┐
+                │  SOURCE OF TRUTH:  <out>/<slug>/messages.csv   │
+                └───────────────────────┬───────────────────────┘
+                                        │ readCsv()
+                                        ▼
+                ┌───────────────────────────────────────────────┐
+                │  Renderers — `src/render/*`                    │
+                │   renderJson | renderMarkdown | renderHtml     │
+                │   + buildMediaMap (media.ts)                   │
+                │   + linkify (render/js/linkify.js)             │
+                └───────────────────────────────────────────────┘
+                                        │
+                                        ▼
+              messages.csv  messages.json  messages.md  messages.html
+              (+ media/  folder of reconciled files)
 ```
 
 ## Component Responsibilities
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
-| CLI / entry | Parse args, wire options, print summary | `src/index.ts` |
-| Orchestrator | Run the full vertical pipeline end-to-end | `src/model.ts` |
-| ZIP extraction | Stream `_chat.txt` from ZIP (no media buffering); derive chat name/slug | `src/extract.ts` |
-| Timestamp detection | Per-file day/month + 12h/24h vote; parse to ISO | `src/parse/timestamp.ts` |
-| Message parser | Streaming line state-machine → `Message[]` | `src/parse/message.ts` |
-| Message model | `Message` / `MessageType` types | `src/parse/types.ts` |
-| CSV store | Read/write/merge CSV source-of-truth; escaping | `src/csv.ts` |
-| Title enrichment | Fetch & cache URL→title map (per platform) | `src/title.ts` |
-| Media reconciliation | Copy matched media to `media/`; resolve disk map | `src/media.ts` |
-| JSON renderer | `JsonEnvelope` with metadata + messages | `src/render/json.ts` |
-| Markdown renderer | Day-sectioned `## date` log | `src/render/md.ts` |
-| HTML renderer | WhatsApp-style bubbles + theme/search/filter | `src/render/html.ts` |
-| Shared render helpers | Accent color + initials per author | `src/render/colors.ts` |
-| Linkify (shared JS) | URL→safe link for Node + browser; offline title | `src/render/js/linkify.js` |
-| Browser viewer JS | client-side search/filter/theme (loaded in html) | `src/render/js/transcript.js` |
-| XSS guard (browser) | `textContent`-only notes | `src/render/js/xss-sanitize.js` |
+| CLI | Parse argv (`[zip]`, `--out`, `--day-first`, `--month-first`, `--verbose`, `--inline`, `--no-fetch-titles`); print final merge count | `src/index.ts` |
+| Orchestrator | Drive the full vertical pipeline; call extract→parse→merge→enrich→media→render; emit verbose report | `src/model.ts` |
+| Zip extract | Stream `_chat.txt` out of the ZIP without buffering media (fflate `Unzip` + `readline`); derive chat slug/name | `src/extract.ts` |
+| Line parser | Streaming state machine: timestamp detection, continuation join, sender/body/media split, type classification, empty-body/attachment merge | `src/parse/message.ts` |
+| Timestamp logic | Invisible-char stripping, single `TS_RE`, per-file `Detection`, `tryParseTimestamp`, year resolution, sanity window | `src/parse/timestamp.ts` |
+| Message model | `Message` / `MessageType` types (the data contract) | `src/parse/types.ts` |
+| CSV layer | Escape/unescape, `dedupeKey`, RFC-4180 read, `writeCsv`, incremental `mergeCsv` (sort+dedupe) | `src/csv.ts` |
+| Media reconciliation | Read ZIP central directory, stream per-entry extraction to `<dir>/media/`, build disk media map, inlineability rules | `src/media.ts` |
+| Title enrichment | Per-platform URL→title fetch (YouTube oEmbed, Reddit `.json`, Stack Exchange API, Medium/LinkedIn/X derivation), parallel workers, persist into CSV | `src/title.ts` |
+| JSON renderer | Build `JsonEnvelope` (metadata + messages) from CSV, write `messages.json` | `src/render/json.ts` |
+| Markdown renderer | Day-sectioned `messages.md` with media embeds / links | `src/render/md.ts` |
+| HTML renderer | WhatsApp-style bubble HTML string + inline `transcript.js` + `#chat-data` JSON island | `src/render/html.ts` |
+| Colors | Deterministic per-author accent hue + initials (mirrored in browser JS) | `src/render/colors.ts` |
+| Linkify (shared) | URL regex, `deriveTitle`, `unwrapUrl` (LinkedIn redirect), `linkifyHtml`/`linkifyMarkdown` | `src/render/js/linkify.js` |
+| Browser viewer | Client-side DOM build from `#chat-data` island, search/filter/theme | `src/render/js/transcript.js` |
+| Fixture generator | Synthetic `_chat.txt` + media + ZIPs into `fixtures/` so tests run without personal data | `scripts/generate-fixtures.mjs` |
 
 ## Pattern Overview
 
-**Overall:** Streaming transform pipeline with a CSV source-of-truth (single-writer, multi-reader).
+**Overall:** Streaming transform pipeline with a **CSV source-of-truth**.
 
 **Key Characteristics:**
-- Everything streams: the ZIP is inflated entry-by-entry (`src/extract.ts:16` `extractChatTxt`), `_chat.txt` is consumed as an async line iterator (`src/extract.ts:73` `readLines`), and the parser is an async generator (`src/parse/message.ts:82` `parseMessages`) — memory stays O(lines), never O(whole-chat).
-- The CSV at `<out>/<slug>/messages.csv` is the single canonical artifact. Parsers produce `Message[]`; the CSV is written once via `mergeCsv`; renderers **re-read it from disk** (`renderJson`/`renderMarkdown`/`renderHtml` each call `readCsv`) so old backups can be re-rendered without the original ZIP.
-- Enrichment and media reconciliation are separate, idempotent side-stages that read the same `Message[]`/CSV and write back (titles into CSV column 6; media files into `media/`).
-- Renderers are pure functions of `(csvPath, outDir, chatName, opts)` and share `buildMediaMap` (`src/media.ts:236`) and `linkify.js` helpers — adding a 4th format means adding one more `renderX` caller in `renderOutputs`.
+- The ZIP is never fully buffered: `extractChatTxt` (`src/extract.ts:16`) inflates only `_chat.txt`; media entries are streamed per-entry from the central-directory index in `reconcileMedia` (`src/media.ts:171`).
+- Parsing is a single-pass `AsyncGenerator` in `parseMessages` (`src/parse/message.ts:82`); lines are yielded as `Message` objects with constant memory regardless of chat size.
+- `messages.csv` is the canonical, re-renderable artifact. All three renderers `readCsv()` from disk (`src/render/json.ts:85`, `src/render/md.ts:90`, `src/render/html.ts:254`), so old backups regenerate JSON/MD/HTML without the original ZIP.
+- Incremental merge produces idempotent re-runs: a second run of the same chat adds **0 rows** (verified by `test/integration.test.ts:123`).
+- Renderers and the browser viewer share the same `linkify.js` module so link/title behavior is identical server-side and client-side.
 
 ## Layers
 
-**CLI layer (`src/index.ts`):**
-- Purpose: arg parsing + user-facing output. No business logic.
-- Location: `src/index.ts`
-- Contains: `buildCli()` (commander program), `program.action` handler.
-- Depends on: `runParser` (`src/model.ts`), `chatInfoFromZip` (`src/extract.ts`).
-- Used by: `npm run dev` / `tsx src/index.ts` / `dist/index.js` (the `bin`).
-
-**Orchestration layer (`src/model.ts`):**
-- Purpose: sequence extraction → parse → merge → enrich → reconcile → render, and report counts.
-- Location: `src/model.ts`
-- Contains: `runParser(zipPath, opts)` (`:83`), `renderOutputs(dir, chatName, opts)` (`:69`), `verboseReport` (`:27`).
-- Depends on: `extract.ts`, `parse/message.ts`, `csv.ts`, `title.ts`, `media.ts`, `render/*`.
-- Used by: `src/index.ts`.
-
-**Extraction layer (`src/extract.ts`):**
-- Purpose: turn ZIP bytes into a streaming `AsyncIterable<string>` over `_chat.txt`, plus chat-name resolution.
+**Ingestion layer (`src/extract.ts`):**
+- Purpose: Get a streaming `AsyncIterable<string>` over `_chat.txt` from the ZIP.
 - Location: `src/extract.ts`
-- Contains: `extractChatTxt` (`:16`), `readLines` (`:73`), `slugifyChatName` (`:118`), `chatNameFromZip` (`:151`), `chatInfoFromZip` (`:177`).
-- Key detail: fflate `Unzip` with `onfile`; only the `_chat.txt` entry is `file.start()`-ed. AppleDouble `._*` and `__MACOSX` are skipped so videos are never inflated (`src/extract.ts:25-29`).
+- Contains: `extractChatTxt` (fflate `Unzip`, skips `__MACOSX`/`._*` companions), `readLines` (event-driven async iterator over `readline.Interface`), `chatNameFromZip` / `chatInfoFromZip` (header-only scan for the folder name), `slugifyChatName`.
+- Depends on: `fflate`, `node:readline`, `node:fs`.
+- Used by: `src/model.ts`.
 
 **Parsing layer (`src/parse/*`):**
-- Purpose: convert raw lines into normalized `Message` objects.
+- Purpose: Turn raw chat lines into normalized `Message` objects with a resolved timestamp.
 - Location: `src/parse/`
-- Contains: `parseMessages` (`src/parse/message.ts:82`), `detectFormat`/`tryParseTimestamp` (`src/parse/timestamp.ts:92`/`:142`), regexes `TS_RE`, `SENDER_RE`, `ATTACHED_RE`, `OMITTED_RE`, `DELETED_RE` (`src/parse/message.ts:15-24`), `Message`/`MessageType` (`src/parse/types.ts`).
-- Depends on: `src/parse/timestamp.ts` invisible-stripping helpers.
-- Used by: `src/model.ts` (imports `parseMessages`).
+- Contains: `message.ts` (state machine + `classifyType`), `timestamp.ts` (`TS_RE`, `detectFormat`, `tryParseTimestamp`), `types.ts` (`Message`, `MessageType`).
+- Depends on: `node:fs` (none), `date-fns` (only in `timestamp.ts` for `format`).
+- Used by: `src/model.ts`.
 
 **Persistence layer (`src/csv.ts`):**
-- Purpose: the canonical on-disk representation.
+- Purpose: Serialize/deserialize the message list to the CSV source-of-truth, with merge/dedupe/sort.
 - Location: `src/csv.ts`
-- Contains: `csvField`/`unescapeField` (`:9`/`:21`), `csvRow` (`:44`), `readCsv` (`:104`), `writeCsv` (`:124`), `mergeCsv` (`:144`), `dedupeKey` (`:59`).
-- CSV header: `timestamp_iso,type,author,text,media,url_titles` (`src/csv.ts:51`). `url_titles` is a JSON-encoded `Record<string,string>`.
+- Contains: `csvField`, `csvRow`, `csvHeader`, `dedupeKey`, `readCsv`, `writeCsv`, `mergeCsv`.
+- Depends on: `node:fs` only.
+- Used by: `src/model.ts`, all renderers, `src/title.ts`.
 
-**Enrichment layer (`src/title.ts`):**
-- Purpose: attach human-readable page titles to shared URLs (`urlTitles`).
-- Location: `src/title.ts`
-- Contains: `enrichTitles` (`:260`), `fetchTitle` (`:181`), `platformOf` (`:61`), and per-platform extractors (`youTubeOembedUrl`, `redditJsonUrl`, `stackExchangeApiUrl`, `deriveLinkedInTitle`, `deriveXTitle`).
-- Used by: `src/model.ts` (`runParser` calls `enrichTitles` then `writeCsv` again).
+**Enrichment layer (`src/title.ts`, `src/media.ts`):**
+- Purpose: Attach external context — fetched web-page titles and reconciled on-disk media.
+- Location: `src/title.ts`, `src/media.ts`
+- Depends on: `node:fs`, `node:zlib`, `node:crypto`, `fetch` (global), `src/render/js/linkify.js`.
+- Used by: `src/model.ts`.
 
-**Media layer (`src/media.ts`):**
-- Purpose: copy matched ZIP media into `media/` and resolve a disk map for renderers.
-- Location: `src/media.ts`
-- Contains: `reconcileMedia` (`:171`), `buildMediaMap` (`:236`), `normalizeMediaName` (`:24`), `readCentralDirectory` (`:76`), `extractEntry` (`:123`), `mimeFromExt`/`isInlineable`.
-- Used by: `src/model.ts` (reconcile) and `render/*` (buildMediaMap).
-
-**Render layer (`src/render/*`):**
-- Purpose: produce the three synchronized outputs.
+**Rendering layer (`src/render/*`):**
+- Purpose: Emit the four synchronized outputs from `messages.csv`.
 - Location: `src/render/`
-- Contains: `renderJson` (`src/render/json.ts:79`), `renderMarkdown` (`src/render/md.ts:84`), `renderHtml` (`src/render/html.ts:248`), `buildEnvelope`/`dayOf`/`timeOf` (`src/render/json.ts`), `getAccentColor`/`initials` (`src/render/colors.ts`), `linkify.js` shared helpers.
-- Used by: `src/model.ts:renderOutputs`.
+- Contains: `json.ts`, `md.ts`, `html.ts`, `colors.ts`, `js/linkify.js`, `js/transcript.js`, `js/xss-sanitize.js`.
+- Depends on: `src/csv.ts`, `src/media.ts`, `src/render/colors.ts`, `src/render/js/linkify.js`.
+- Used by: `src/model.ts` (`renderOutputs`).
 
 ## Data Flow
 
-### Primary Request Path (single CLI invocation)
+### Primary Request Path (full run)
 
-1. `src/index.ts:33` `program.action` receives `zip` path + options, calls `runParser(zip, opts)` (`src/index.ts:46`).
-2. `runParser` (`src/model.ts:83`): `chatInfoFromZip(zip)` → `{slug, name}` (`src/model.ts:87`); `fs.mkdir(dir)` (`src/model.ts:90`).
-3. `extractChatTxt(zip)` returns an `AsyncIterable<string>` of `_chat.txt` lines (`src/model.ts:92`).
-4. `parseMessages(lines, {dayFirst, monthFirst, warnings, onDetection})` streams `Message` objects; format detection runs once over the first ≤200 lines (`src/parse/message.ts:64-184`). `runParser` pushes each into `messages[]` (`src/model.ts:96-105`).
-5. `mergeCsv(dir/messages.csv, messages)` dedupes + stable-sorts ascending by `timestamp_iso` and writes the CSV source-of-truth (`src/model.ts:109`, `src/csv.ts:144`).
-6. `enrichTitles(readCsv(...), {enabled, concurrency:8, timeoutMs:5000})` fetches URL titles and `writeCsv` persists them back into column 6 (`src/model.ts:113-121`).
-7. `reconcileMedia(zip, dir, distinctMedia)` streams matched media entries into `dir/media/` (`src/model.ts:126-127`, `src/media.ts:171`).
-8. `renderOutputs(dir, name, {inline})` re-reads `messages.csv` from disk and writes `messages.json`, `messages.md`, `messages.html` (`src/model.ts:131`, `src/model.ts:69-81`).
-9. `index.ts` prints the `✓ Merged N message(s)` summary (`src/index.ts:58-68`).
+1. CLI parses args → `runParser(zipPath, opts)` (`src/index.ts:46` → `src/model.ts:83`).
+2. `chatInfoFromZip(zipPath)` resolves `{ slug, name }` (header-only ZIP scan — `src/extract.ts:177`).
+3. `extractChatTxt(zipPath)` returns an `AsyncIterable<string>` over `_chat.txt` (`src/extract.ts:16`).
+4. `parseMessages(lines, { dayFirst, monthFirst, warnings, onDetection })` streams `Message` objects (`src/parse/message.ts:82`). Format detection runs once over the first ~200 lines via `detectFormat` (`src/parse/timestamp.ts:92`).
+5. `mergeCsv(path, messages)` merges into `messages.csv`, dedupe by `dedupeKey`, stable ascending sort by `timestamp_iso` (`src/csv.ts:144`). Returns new-row count.
+6. `readCsv(csvPath)` reloads merged rows; `enrichTitles(merged, { enabled, concurrency:8, timeoutMs:5000 })` fetches URL titles and `writeCsv` persists them (`src/title.ts:260`).
+7. `reconcileMedia(zipPath, dir, distinctMedia)` copies matched media to `<dir>/media/` (`src/media.ts:171`).
+8. `renderOutputs(dir, name, { inline })` re-reads CSV and writes `messages.json`, `messages.md`, `messages.html` (`src/model.ts:69`).
+9. CLI prints `✓ Merged version` and the three rendered paths (`src/index.ts:58`).
 
-### Re-render path (no ZIP needed)
+### Single-message transformation shape
 
-- Any renderer can be invoked on an existing `messages.csv`: each calls `readCsv(csvPath)` at the top (`src/render/json.ts:85`, `src/render/md.ts:90`, `src/render/html.ts:254`). This is why the CSV — not the `Message[]` in memory — is the source-of-truth.
+A `Message` (`src/parse/types.ts:11`):
+```typescript
+interface Message {
+  timestamp_iso: string;          // 2026-07-23T09:47:18 (local, no TZ)
+  type: MessageType;              // text|photo|video|sticker|document|system|deleted|omitted
+  author: string;                 // raw, incl. bidi wrappers / ~ prefix (D-09)
+  text: string;                   // body with markers stripped; may be ''
+  media: string;                  // media filename or ''
+  urlTitles?: Record<string,string>; // URL -> fetched title (enrichment)
+}
+```
+`MessageType` is locked to 8 values (`src/parse/types.ts:1`); there is no `audio` type — audio files fall back to `document` (`src/parse/message.ts:31`).
 
-### Title-enrichment detail
+### Incremental merge / dedupe (the core idempotency mechanism)
 
-1. `enrichTitles` collects unique `http(s)` URLs via `URL_RE` (`src/title.ts:274-280`).
-2. A bounded worker pool (default `concurrency:8`) fetches each URL once and fills a `map[url]=title` (`src/title.ts:287-302`).
-3. Titles are mapped back onto each message's `urlTitles` using either the fetched title or `deriveTitle(url)` offline fallback (`src/title.ts:303-314`).
+- `dedupeKey` (`src/csv.ts:59`) joins `(timestamp_iso, author, text, media)` with the ASCII Unit Separator `\u001f` (cannot appear in chat content, so no false collisions, D-16).
+- `mergeCsv` (`src/csv.ts:144`):
+  1. load existing rows (or `[]`);
+  2. index existing keys in a `Set`;
+  3. keep only `newMessages` whose key is absent (`fresh`);
+  4. concatenate `existing.concat(fresh)` and stable-sort by `timestamp_iso` ascending, with the original array index as tiebreaker so same-second bursts keep insertion order (D-17);
+  5. rewrite header + rows.
+- Returned value is `fresh.length` — the count surfaced as "Merged N new message(s)".
+- Re-running the same chat yields `fresh.length === 0` (verified `test/integration.test.ts:123`), making the tool safe to run repeatedly against the same output folder.
 
-**State Management:** No global mutable state. The pipeline is a sequence of pure-ish transforms over `Message[]` and the CSV file. `runParser` holds `messages[]` and `detection` only as local variables. `renderOutputs` is stateless (reads from disk). Per-request transient state: `detection` (format decision), `warnings[]` (verbose), `mediaReport` (resolved/unresolved).
+### Empty-body + attachment merge (no phantom rows)
+
+`parseMessages` (`src/parse/message.ts:151`) holds an empty `Message` (`heldEmpty`) when a timestamped line has `text === '' && !media`. If the next line is a same-author attachment, the held-empty is discarded and only the media row is emitted (`src/parse/message.ts:139`). This avoids the phantom empty row before every media row (D-04/§3.4).
+
+### Render-from-CSV (re-render without ZIP)
+
+Renderers never depend on `parseMessages` output — they call `readCsv(csvPath)` (`src/render/json.ts:85`) and `buildMediaMap(dir, messages)` (`src/media.ts:236`). This is why `messages.html` can be regenerated later purely from the folder.
+
+**State Management:** No global mutable state. `detection` and `warnings` are local to `parseMessages`; per-run config flows through `RunOptions` (`src/model.ts:15`) and `ParseOptions` (`src/parse/message.ts:53`). The only cross-invocation state is the CSV file on disk.
 
 ## Key Abstractions
 
-**Streaming ZIP reader (`extractChatTxt` / `readLines`):**
-- Purpose: memory-safe access to `_chat.txt` without inflating media.
-- Examples: `src/extract.ts:16`, `src/extract.ts:73`.
-- Pattern: fflate `Unzip` → only `_chat.txt` `file.start()` → `readline.Interface` over a `PassThrough`; a hand-rolled async-iterator queue (`readLines`) avoids Node 26 `for await` hang on async-fed streams.
+**`Message` (`src/parse/types.ts:11`):** The universal data contract. Everything downstream (CSV, renderers, enrichment) operates on `Message`.
 
-**Line state-machine parser (`parseMessages`):**
-- Purpose: robustly split a free-form export into messages, handling multi-line continuations, held-empty attachment merging, and per-file format detection.
-- Examples: `src/parse/message.ts:82`, `src/parse/message.ts:103` `processLine`.
-- Pattern: async generator yielding `Message`; continuation lines appended to `current`/`heldEmpty` (`src/parse/message.ts:92`); empty-body timestamped lines held then merged with a same-author attachment (`src/parse/message.ts:139-155`).
+**`Detection` (`src/parse/timestamp.ts:36`):** The per-file format decision `{ dayFirst, is12h, example?, overridden? }`. Computed once via `detectFormat` over a bounded sample (PARSE-03), then applied to every line by `tryParseTimestamp`. CLI `--day-first`/`--month-first` short-circuit the vote and set `overridden: true`.
 
-**CSV source-of-truth (`csv.ts`):**
-- Purpose: one canonical, re-readable artifact; single physical line per row (newlines backslash-escaped in `csvField`).
-- Examples: `src/csv.ts:9` `csvField`, `src/csv.ts:59` `dedupeKey` (uses U+001F Unit Separator so legitimate content can't collide), `src/csv.ts:144` `mergeCsv` (stable ascending sort by `timestamp_iso`).
-- Pattern: RFC-4180 writer/reader with a custom single-left-to-right unescape to avoid double-unescaping `\n`.
+**`ReconcileResult` (`src/media.ts:153`):** `{ resolved, unresolved }` — drives the verbose media report in `src/model.ts:143`.
 
-**Title enrichment (`enrichTitles` / `fetchTitle`):**
-- Purpose: attach context to links without blocking the pipeline.
-- Examples: `src/title.ts:260`, `src/title.ts:181`.
-- Pattern: per-platform dispatch (`platformOf`) — YouTube oEmbed, Reddit `.json`, Stack Exchange API, Medium HTML, LinkedIn/X offline slug-derivation, generic `<title>` — each with safe fallbacks; result cached in `urlTitles`.
+**`JsonEnvelope` (`src/render/json.ts:22`):** `{ metadata, messages }` — the structured shape written to `messages.json` and embedded as the `#chat-data` JSON island in `messages.html` for the browser viewer.
 
-**Media reconciliation (`reconcileMedia` / `buildMediaMap`):**
-- Purpose: tolerant filename matching + disk-resident media map for renderers.
-- Examples: `src/media.ts:171`, `src/media.ts:236`.
-- Pattern: read ZIP central directory only (`readCentralDirectory`, `src/media.ts:76`) for authoritative sizes; stream each matched entry out (`extractEntry`, `src/media.ts:123`); `normalizeMediaName` drops `(1)` markers and whitespace so `Photo (1).JPG` matches `photo.jpg`.
-
-**Renderer contract (`render<Format>`):**
-- Purpose: uniform way to emit an output from the CSV.
-- Examples: `src/render/json.ts:79`, `src/render/md.ts:84`, `src/render/html.ts:248` — all `(csvPath, outDir, chatName, opts) => Promise<string>` returning the written path.
-- Pattern: `readCsv` + `buildMediaMap` + shared `linkify.js`; JSON/MD/HTML re-use `dayOf`/`timeOf` (`src/render/json.ts:32-38`) and `linkifyHtml`/`linkifyMarkdown`/`deriveTitle` (`src/render/js/linkify.js`).
+**`MediaEntry` (`src/media.ts:219`):** `{ relPath, mime, size, inlineable }` — returned by `buildMediaMap` so renderers know whether a media ref has an on-disk file and whether it may be base64-inlined.
 
 ## Entry Points
 
 **CLI binary (`src/index.ts`):**
 - Location: `src/index.ts`
-- Triggers: `node dist/index.js`, `npm run dev`, `npx tsx src/index.ts`.
-- Responsibilities: commander setup (positional `[zip]`, flags `--zip/--out/--day-first/--month-first/--verbose/--inline/--no-fetch-titles`), then `runParser`. The `#!/usr/bin/env node` shebang + `bin.wa-backup` in `package.json` make it a CLI.
+- Triggers: `node dist/index.js <zip> [...]` (built), or `npm run dev -- <zip>` (`tsx src/index.ts`).
+- Responsibilities: `buildCli()` wires commander; the `.action` callback resolves the ZIP path, calls `runParser`, reads `chatInfoFromZip` again for the final message (`src/index.ts:54`), and prints results. `buildCli().parseAsync(process.argv)` runs at module load (`src/index.ts:78`).
+- `package.json` `bin`: `"wa-backup": "dist/index.js"` (`package.json:7`).
 
-**Library entry (`src/model.ts` `runParser`):**
-- Location: `src/model.ts:83`
-- Triggers: the CLI action.
-- Responsibilities: own the full pipeline (steps listed in Data Flow).
+**Programmatic API (`src/model.ts`):**
+- `runParser(zipPath, opts)` → `Promise<number>` (rows added).
+- `renderOutputs(dir, chatName, opts)` → re-render the three artifacts from an existing CSV.
+- `verboseReport(detection, warnings, count)` → stderr format report.
+- Imported directly by tests (`test/integration.test.ts:8`).
 
 ## Architectural Constraints
 
-- **Module system:** ESM-only (`"type": "module"` in `package.json`); `tsup` builds to `dist/index.js` as ESM (`tsup.config.ts`). Dynamic `await import('./title.js')` (`src/model.ts:113`) is used to lazy-load the network-dependent enrichment only when needed.
-- **Browser-shared JS:** `src/render/js/*.js` are plain `.js` (no TS, no Node imports) so they load both in Node renderers and in the browser viewer (`src/render/html.ts:264` reads `transcript.js` from disk and inlines it). They must not `import` from `node:*`.
-- **Single physical line per CSV row:** enforced by `csvField` backslash-escaping newlines (`src/csv.ts:9-17`) — renderers rely on this.
-- **Global state:** none. All transient state is local to `runParser` or renderer calls. (The only module-level constants are regexes and the `MIME_BY_EXT` map.)
-- **Circular imports:** not present. Dependency direction is strictly `index → model → {extract, parse, csv, title, media, render}`; `render → {csv, media, parse/types, render/js}`; `csv → parse/types` only.
-- **Threading:** single-threaded Node event loop; concurrency is cooperative (async workers in `enrichTitles` bounded by `concurrency`, `src/title.ts:282`; `Promise.all` over media writes, `src/media.ts:211`).
+- **Module system:** ESM only — `"type": "module"` (`package.json:5`); `tsconfig` `module: ESNext`, `moduleResolution: Bundler`. Imports of local `.js` extensions are required for the browser-shared `linkify.js` (`src/title.ts:3` imports `./render/js/linkify.js`).
+- **Target runtime:** Node ≥ 22.12 (`package.json:13`); `engines.node` enforced. Built with `tsup` (`tsup.config.ts`) emitting `dist/` with a shebang.
+- **Threading:** Single-threaded event loop. No worker threads. Parallelism is achieved via concurrent promises: title fetching uses bounded worker pool (`src/title.ts:287`), media writes use `Promise.all` (`src/media.ts:211`).
+- **Global state:** None in source modules. Per-run state is local. The only persistent state is the CSV + `media/` folder on disk.
+- **Memory safety:** Both ZIP reading paths avoid full-archive buffering — `extractChatTxt` never `start()`s media entries (`src/extract.ts:27`), and `reconcileMedia` reads the central directory (metadata only) then streams each member via a bounded `ReadStream` (`start`/`end`) (`src/media.ts:135`).
+- **Circular imports:** Not present. Dependency direction is strictly `index → model → {extract, parse, csv, media, render, title}`; `title` depends only on `parse/types` + `render/js/linkify.js`; renderers depend on `csv`/`media`/`colors`/`linkify.js`.
 
 ## Anti-Patterns
 
-### Reading the whole archive into memory
+### Buffering the whole ZIP to read `_chat.txt`
 
-**What happens:** using jszip-style load-the-entire-ZIP APIs would buffer videos.
-**Why it's wrong:** violates the memory-safety constraint (large WhatsApp zips with video).
-**Do this instead:** fflate streaming `Unzip` + central-directory reads as in `src/extract.ts:16` and `src/media.ts:76` — only `_chat.txt` is inflated; media is streamed entry-by-entry.
+**What happens:** A naive `jszip.loadAsync(buffer)` reads the entire archive (including videos) into memory before any entry is available.
+**Why it's wrong:** Fatal for large WhatsApp exports — defeats the memory-safety constraint (PARSE-02).
+**Do this instead:** Use fflate's streaming `Unzip` and call `file.start()` only on the `_chat.txt` entry (`src/extract.ts:22-39`). For media, stream per-entry from the central-directory index (`src/media.ts:171`).
 
-### Treating the in-memory `Message[]` as the source-of-truth
+### `for await (const line of readline)` over an async-fed PassThrough
 
-**What happens:** writing outputs directly from the parsed array.
-**Why it's wrong:** breaks idempotent re-render and the title-merge step that writes back to disk.
-**Do this instead:** renderers call `readCsv(csvPath)` (`src/render/json.ts:85`) and operate on the persisted CSV.
+**What happens:** Node's built-in async iterator over a `readline.Interface` fed by fflate's inflate callback can hang (observed on Node 26) because `line` events fire before a listener is attached.
+**Why it's wrong:** The stream silently stalls and the whole parse never completes.
+**Do this instead:** Use the event-driven `readLines` queue (`src/extract.ts:73`) that buffers `line`/`close` events and fulfills a pending reader promise — fully streaming, no `line` event is ever missed.
+
+### Treating an invalid date as a new message
+
+**What happens:** A line that matches `TS_RE` shape but fails validation (e.g. `31/02`, or year < 2009) gets emitted as a row.
+**Why it's wrong:** Produces phantom/junk messages.
+**Do this instead:** `tryParseTimestamp` returns `null` for invalid/out-of-range dates; the parser appends the line as a continuation to the open message (`src/parse/message.ts:112-117`). Optional warnings are collected (`src/parse/timestamp.ts:167`).
+
+### Regenerating renderers from parse output instead of CSV
+
+**What happens:** A renderer imports `parseMessages` and re-parses the ZIP each time it renders.
+**Why it's wrong:** Violates the "re-render from folder without ZIP" goal and duplicates work.
+**Do this instead:** All renderers `readCsv(csvPath)` from the existing source-of-truth (`src/render/json.ts:85`, `src/render/md.ts:90`, `src/render/html.ts:254`).
 
 ## Error Handling
 
-**Strategy:** fail-soft and report, never throw on missing media or unparseable lines.
+**Strategy:** Fail fast at the CLI boundary; recover gracefully inside the pipeline.
 
 **Patterns:**
-- Unparseable timestamps are treated as continuations (`src/parse/message.ts:112-117`, `tryParseTimestamp` returns `null`).
-- Missing media → placeholder in renderers (`src/render/html.ts:61`, `src/render/md.ts:54`), `reconcileMedia` returns `unresolved[]` and never throws (`src/media.ts:171`).
-- User-facing errors are caught in `src/index.ts:69` and printed via `picocolors` red; `process.exitCode = 1`.
-- Title fetch failures fall back to offline `deriveTitle` (`src/title.ts:246-248`).
+- ZIP missing `_chat.txt` → `extractChatTxt` rejects with `No _chat.txt entry found in ZIP` (`src/extract.ts:57`); propagated to CLI which prints a red error and sets `process.exitCode = 1` (`src/index.ts:69-72`) without crashing.
+- Media never throws on unresolved: `reconcileMedia` returns `unresolved` refs and the renderers render placeholders (`MEDIA-03`/`MEDIA-04`). Missing media is reported on stderr, not into the artifacts (`src/model.ts:143`).
+- Malformed CSV rows (wrong field count) are skipped but their raw text is preserved in `text` to avoid data loss (`src/csv.ts:107`).
+- Title fetch failures degrade gracefully: every platform method falls back to `deriveTitle(url)` (offline URL-derived label) (`src/title.ts:246`).
 
 ## Cross-Cutting Concerns
 
-**Logging:** `picocolors` (`pc`) for stderr/progress; verbose reporting via `verboseReport` (`src/model.ts:27`). Artifacts (json/md/html) stay clean — diagnostics go to stderr.
+**Logging:** `console.error` via `picocolors` for stderr diagnostics (`verboseReport`, media report, title verbose). Artifacts (JSON/MD/HTML/CSV) stay clean. `console.log` only for the final success line.
 
-**Validation:** `isValidYmd` sanity check + year window (`src/parse/timestamp.ts:76`, `:167`); CSV row-count guard in `readCsv` (`src/csv.ts:108`).
+**Validation:** Timestamp validation in `tryParseTimestamp` (`src/parse/timestamp.ts:142`) — sanity window (`year >= 2009 && year <= currentYear+1`) and `isValidYmd`. Media name matching is tolerant via `normalizeMediaName` (`src/media.ts:24`).
 
-**Authentication:** none (local-only tool, no accounts/secrets).
+**Authentication:** None. Title fetching uses a browser-like `User-Agent` (`src/title.ts:7`) and per-platform endpoints; no credentials.
 
-**Security / XSS:** all untrusted chat text is HTML-escaped (`escapeHtml` in `src/render/html.ts:11`, `src/render/js/linkify.js:7`) before being placed in anchors; `</script` is neutralized in the JSON island (`src/render/html.ts:262`); browser viewer uses `textContent` (`src/render/js/xss-sanitize.js`).
+**Security / XSS:** All renderer text is escaped before output — `escapeHtml` (`src/render/html.ts:11`), `escapeMd` (`src/render/md.ts:31`), and `linkify.js` escapes every interpolated value. The HTML renderer escapes `</` in the JSON island to defeat `</script>` injection (`src/render/html.ts:262`). The browser viewer builds DOM via `createElement` + `setText`/`textContent` only (`src/render/js/transcript.js:5`, `src/render/js/xss-sanitize.js`).
 
-**Output portability:** `messages.html` is standalone (CSS inlined, JS inlined), opens in any browser with no server; media referenced via relative `media/` paths or `data:` URIs under `--inline`.
+**Determinism:** Per-author accent colors are SHA-256-derived so server and browser render identically (`src/render/colors.ts:10` mirrors `src/render/js/transcript.js:16`).
 
 ---
 

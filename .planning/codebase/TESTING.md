@@ -4,149 +4,147 @@
 
 ## Test Framework
 
-**Runner:** Node.js built-in test runner — `node:test` (no third-party framework, satisfying the no-new-dependency rule).
+**Runner:** Node.js built-in test runner — `node:test` (no third-party framework like Jest/Vitest).
+**Assertion library:** `node:assert/strict` (`import assert from 'node:assert/strict';`).
+**Type checking in tests:** tests are `.ts` and included in `tsconfig.json`'s `include: ["src", "test"]`, so `npm run typecheck` (`tsc --noEmit`) validates them.
 
-**Assertion library:** `node:assert/strict` (imported as `import assert from 'node:assert/strict'`). Deep equality via `assert.deepEqual`, thrown errors via `assert.throws`/`assert.rejects` where used, and `assert.ok` for boolean conditions.
-
-**TypeScript execution:** Tests are `.ts` files run directly through `tsx` via the `--import tsx` loader. No separate compile step — the runner executes the same TypeScript sources as the app.
-
-## Run Commands
-
+**Run commands** (`package.json`):
 ```bash
-node --import tsx --test "test/*.test.ts"   # run all tests
-node --import tsx --test "test/title.test.ts"   # single file (glob the filename)
-node --import tsx --test "test/*.test.ts" --watch  # watch mode (node:test supports --watch)
+npm test              # node --import tsx --test "test/*.test.ts"
+npm run pretest       # node scripts/generate-fixtures.mjs  (runs automatically BEFORE npm test)
+npm run lint          # eslint .  (also gates CI)
+npm run typecheck     # tsc --noEmit
+npm run build         # tsup
 ```
 
-- `package.json` script: `"test": "node --import tsx --test \"test/*.test.ts\""`.
-- The glob `test/*.test.ts` is passed as a single quoted argument; the shell expands it (or node:test's own globbing applies). Add a specific filename to run a subset.
-- **No coverage tooling is configured** (no `c8`/`nyc` dependency; coverage is not enforced). `tsc --noEmit` (`npm run typecheck`) provides static verification instead.
+`test/*.test.ts` is the glob — every file matching that pattern under `test/` is collected. `tsx` is loaded via `--import tsx` so TypeScript tests run without a separate compile step.
 
 ## Test File Organization
 
-**Location:** All tests live in `test/` at the repo root, one file per source module area:
+**Location:** All tests live in `test/` at repo root (co-located suites, not next to source). One file per concern/area:
+- `test/timestamp.test.ts` — date/timestamp detection & parsing (`src/parse/timestamp.ts`).
+- `test/tracer.test.ts` — end-to-end CSV extraction correctness against both fixtures.
+- `test/integration.test.ts` — full `runParser` vertical path, dedupe, ordering, url titles, root-level `_chat.txt`.
+- `test/classify.test.ts` — message-type classification (`src/parse/message.ts`).
+- `test/csv.test.ts` — `src/csv.ts` read/write/merge/dedupe/escaping.
+- `test/media.test.ts` — `src/media.ts` reconciliation, inline, placeholders.
+- `test/title.test.ts` — `src/title.ts` fetching, platform classification, mocked network.
+- `test/render.test.ts` — JSON/MD/HTML renderers + XSS inertness (`src/render/*`).
+- `test/linkify.test.ts` — `src/render/js/linkify.js` unit + integration.
+- `test/theme.test.ts` — HTML theme toggle / filter classic-script behavior.
+- `test/html-media.test.ts` — HTML media `<img>` / lightbox behavior.
 
-| Test file | Covers |
-|-----------|--------|
-| `test/title.test.ts` | `src/title.ts` — `extractTitle`, `fetchTitle`, `enrichTitles`, platform classification, per-platform parsers |
-| `test/linkify.test.ts` | `src/render/js/linkify.js` — `deriveTitle`, `linkifyHtml`, `linkifyMarkdown`, `unwrapUrl`, `faviconFor` |
-| `test/timestamp.test.ts` | `src/parse/timestamp.ts` — date-format detection |
-| `test/classify.test.ts` | message-type classification |
-| `test/csv.test.ts` | `src/csv.ts` — CSV read/write/merge |
-| `test/render.test.ts` | JSON/MD/HTML renderers |
-| `test/html-media.test.ts` | HTML media rendering |
-| `test/media.test.ts` | `src/media.ts` — media reconciliation |
-| `test/theme.test.ts` | color/theme helpers (`src/render/colors.ts`) |
-| `test/tracer.test.ts` | tracer/progress logging |
-| `test/integration.test.ts` | full pipeline `runParser` over real sample chats |
+**Naming:** `<area>.test.ts`. Test titles are descriptive and frequently reference the originating design-doc ID (e.g. `'12h detection: PM token converts to 24h (D-02)'`, `'invalid date -> null continuation signal (D-04)'`). This makes failures traceable to `research/`.
 
-**Naming:** `<area>.test.ts`, mirrored to the source module name. Test functions are named `test('short description', () => {...})`.
+## Test Structure
 
-**Style — NO `describe` blocks.** The suite uses flat top-level `test(...)` calls with descriptive string names (verified across all 11 files — every import is `import { test } from 'node:test'` or `import test from 'node:test'`). Grouping is by comment banners like `// ---- unit: deriveTitle ----` (`test/linkify.test.ts:19`) rather than nested `describe` suites.
+**Suite shape:** flat list of `test('description', () => { ... })` calls — no nested `describe` blocks (the runner's `describe` is not used in this codebase).
 
-## Test Structure & Patterns
-
-**Basic unit test:**
-```ts
+**Two import styles** appear for the runner (both valid):
+```typescript
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveTitle } from '../src/render/js/linkify.js';
+```
+and (in `test/theme.test.ts`, `test/linkify.test.ts`, `test/html-media.test.ts`) the default import:
+```typescript
+import test from 'node:test';
+import assert from 'node:assert/strict';
+```
+Prefer the named form for consistency in new tests.
 
-test('deriveTitle: strips scheme, www, trailing slash, query', () => {
-  assert.equal(deriveTitle('https://www.github.com/owner/repo?x=1'), 'github.com/owner/repo');
-  assert.equal(deriveTitle('http://example.com/'), 'example.com');
+**Async tests:** await inside the test callback; the runner awaits the returned promise:
+```typescript
+test('Plataforma WK: authoritative end-to-end assertions', async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-int-out-'));
+  const records = await run(WK, out);
+  assert.equal(records[0][0], '2026-07-23T09:47:18');
 });
 ```
-(`test/linkify.test.ts:21-26`)
+(`test/integration.test.ts`)
 
-**Assertion helpers used:** `assert.equal` (strict equality), `assert.deepEqual` (`test/title.test.ts:103`), `assert.ok` with a message string (`test/title.test.ts:64,74`).
-
-## Mocking Strategy
-
-**No mocking library.** Two patterns:
-
-### 1. Local `node:http` mock server (for real network reads)
-Used in `test/title.test.ts` via a `startServer(body, { contentType, delayMs })` helper (`test/title.test.ts:22-40`) that:
-- Creates `createServer` bound to `127.0.0.1:0` (ephemeral port).
-- Returns `{ url, close }`; tests `try/finally` call `srv.close()` to free the port.
-- Simulates latency (`delayMs`) to exercise the timeout fallback (`test/title.test.ts:60-68`) and wrong content-type (`test/title.test.ts:70-78`).
-
-```ts
-const srv = await startServer('<title>My Page</title>');
-try {
-  assert.equal(await fetchTitle(srv.url), 'My Page');
-} finally {
-  srv.close();
-}
-```
-(`test/title.test.ts:51-58`)
-
-### 2. `globalThis.fetch` swap (for platform-specific dispatches)
-Network calls are intercepted by temporarily reassigning the global `fetch`, restoring it in `finally`:
-```ts
-const original = globalThis.fetch;
-globalThis.fetch = (async (u: any) => {
-  if (String(u).includes('/oembed')) {
-    return new Response(JSON.stringify({ title: 'My Video' }),
-      { status: 200, headers: { 'content-type': 'application/json' } });
-  }
-  return new Response('<title>ignored</title>', { status: 200 });
-}) as any;
-try {
-  assert.equal(await fetchTitle('https://youtube.com/watch?v=1'), 'My Video');
-} finally {
-  globalThis.fetch = original;   // always restore
-}
-```
-(`test/title.test.ts:288-304`). This pattern is used per-platform to assert:
-- YouTube uses the oEmbed endpoint (`/oembed`) — line 288.
-- Reddit uses the `.json` listing — line 306.
-- Stack Overflow uses the Stack Exchange API — line 229.
-- Medium uses `og:title` from mocked HTML — line 250.
-- **LinkedIn and X are OFFLINE** — tests assert `networkCalled === false` after swapping `fetch` to a spy that flips a flag (`test/title.test.ts:271-284, 324-340`).
-
-### Console spying
-For verbose-logging tests, `console.error` is swapped to a capturing array and restored in `finally`:
-```ts
-const logs: string[] = [];
-const orig = console.error;
-console.error = (...a: unknown[]) => logs.push(a.join(' '));
-try { await enrichTitles(msgs, { enabled: true, verbose: true }); }
-finally { console.error = orig; }
-```
-(`test/title.test.ts:106-128`); assertions check `logs.some((l) => l.includes('[wa-backup] title:'))`.
-
-## Integration / End-to-End Tests
-
-**`test/integration.test.ts`** exercises the full `runParser` pipeline (`src/model.ts:83`) over **real sample chat data**:
-- Reads `data/<chat>/_chat.txt` from disk (`data/WhatsApp Chat - Plataforma WK`, `data/WhatsApp Chat - Notas pessoais`), zips it in-memory with `zipSync` from `fflate`, writes to a temp dir via `fs.mkdtempSync(os.tmpdir(), ...)`, runs `runParser`, then asserts on the resulting `messages.csv` (parsed with a local minimal RFC-4180 reader `parseCsv` at `test/integration.test.ts:18-42`).
-- The `data/` directory is **gitignored** (`data/` in `.gitignore`) — sample chats are real exports and must not be committed. Tests referencing `data/` only pass on a machine with those fixtures present.
-- `test/linkify.test.ts:85-128` similarly builds an in-memory ZIP (`zipSync`) and asserts rendered HTML/MD/JSON outputs contain the expected anchors and that JSON text is left unchanged.
+**Helpers:** shared logic is duplicated per-file, not extracted to a common lib — e.g. `parseCsv` (a minimal RFC-4180 reader) is redefined in `test/integration.test.ts`, `test/classify.test.ts`, and `test/tracer.test.ts`. A `ROOT = process.cwd()` constant and per-test `fs.mkdtempSync(path.join(os.tmpdir(), 'wa-<topic>-'))` temp dirs are the standard harness.
 
 ## Fixtures
 
-- **`data/`** (gitignored): real WhatsApp `_chat.txt` exports used by `test/integration.test.ts`. Not committed; required locally for integration tests.
-- **`test/fixtures/`**: listed in `.gitignore` (`test/fixtures/`) but currently unused by the suite — reserved for future binary/golden fixtures.
-- In-memory fixtures dominate: network responses are synthesized by `startServer` or `globalThis.fetch` swaps; chat transcripts are built as strings and zipped with `fflate`'s `zipSync` (`test/linkify.test.ts:93`, `test/integration.test.ts:31`).
+**Synthetic, generated, non-personal.** Real exports are gitignored under `data/`. Tests depend on `./fixtures` generated by `scripts/generate-fixtures.mjs`, which the `pretest` npm script runs automatically before `npm test`.
 
-## Coverage of Title Fetching (the riskiest area)
+`scripts/generate-fixtures.mjs`:
+- Writes two chat folders (`fixtures/WhatsApp Chat - Notas pessoais/`, `fixtures/WhatsApp Chat - Plataforma WK/`) each with a `_chat.txt` and placeholder media files (8-byte PNG header `Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a])`).
+- Also writes `fixtures/WhatsApp Chat - Notas pessoais.zip` (used by `test/media.test.ts`, `test/theme.test.ts`, `test/html-media.test.ts`) via `fflate`'s `zipSync`.
+- Content reproduces the exact demo strings the assertions pin (so tests are stable) but contains no personal conversations.
 
-`test/title.test.ts` is the most thorough suite and covers:
-- Pure extraction: `extractTitle` `<title>` + `og:title` preference (`test/title.test.ts:42-49,197-202`).
-- Per-platform URL builders + parsers: YouTube (`youTubeOembedUrl`/`parseYouTubeOembed`), Reddit (`redditJsonUrl`/`parseRedditJson`), LinkedIn (`deriveLinkedInTitle` offline), Medium (`fetchMediumTitle`), Stack Overflow (`stackExchangeApiUrl`/`parseStackOverflowJson`), X (`deriveXTitle`).
-- Fallback behavior: timeout (`test/title.test.ts:60-68`), non-HTML content (`70-78`), oEmbed failure falling back to generic (`342-358`), LinkedIn redirect unwrapping to the real destination title (`366-386`).
-- Concurrency/dedup + opt-out: `enrichTitles` maps URLs to titles and dedupes (`80-96`), `enabled:false` leaves `urlTitles = {}` (`98-104`), verbose logging toggle (`106-145`).
-- Offline guarantee: LinkedIn and X never call `fetch` (`271-284, 324-340`).
+**Fixtures are read via `process.cwd()`** — tests assume they are run from the repo root (`ROOT = process.cwd()`), so `npm test` must be invoked at the project root.
+
+## Mocking
+
+**No mocking library.** Three techniques are used:
+
+1. **In-memory synthetic ZIPs** built with `fflate`'s `zipSync` directly in the test (no fixture file needed):
+```typescript
+const zipped = zipSync({ [`${chat}/_chat.txt`]: Buffer.from(txt, 'utf8') });
+const zipPath = path.join(tmp, 'export.zip');
+fs.writeFileSync(zipPath, Buffer.from(zipped));
+await runParser(zipPath, { out });
+```
+(`test/integration.test.ts`, `test/render.test.ts`, `test/linkify.test.ts`)
+
+2. **Real HTTP server** for network-dependent tests (`node:http` `createServer` listening on `127.0.0.1:0`):
+```typescript
+const srv = createServer((_q, res) => {
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.end('<title>Mock Title</title>');
+});
+srv.listen(0, '127.0.0.1', () => { ... });
+```
+Always closed in `finally` (`test/title.test.ts`, `test/integration.test.ts`).
+
+3. **`globalThis.fetch` override** for the title-enrichment network path — save the original, assign a stub returning a `Response`, restore in `finally`:
+```typescript
+const original = globalThis.fetch;
+globalThis.fetch = (async (u: any) => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } })) as any;
+try { assert.equal(await fetchTitle('https://medium.com/@me/post'), 'Medium Post'); }
+finally { globalThis.fetch = original; }
+```
+(`test/title.test.ts`) — note assertions that specific platforms (`linkedin`, `x`) must NOT hit the network (`networkCalled === false`).
+
+**Console capture:** when asserting on diagnostics, tests temporarily reassign `console.error` to a buffer array, then restore (`test/media.test.ts` "unresolved media ref", `test/title.test.ts` verbose tests).
 
 ## Common Patterns
 
-**Async testing:** `async () => {...}` test functions; `await` the unit under test directly. No special setup/teardown framework — resource cleanup uses `try/finally` (`srv.close()`, restore `globalThis.fetch`, restore `console.error`).
+**Assertions:** `assert.equal`, `assert.ok`, `assert.deepEqual`, `assert.match`, `assert.doesNotMatch`, `assert.notEqual`. String matching on rendered output uses regex via `assert.ok(html.includes(...))` / `assert.match`. There is no snapshot library; output is asserted by substring/regex.
 
-**Error / fallback testing:** assert the *degraded* output rather than throwing — e.g. timeout returns a derived (host-based) title containing `127.0.0.1` (`test/title.test.ts:63-64`).
+**Temp isolation:** every integration test creates a unique `os.tmpdir()` subdir (`fs.mkdtempSync`) and writes the run output there, avoiding cross-test state.
 
-**XSS / safety testing:** linkify tests explicitly assert escaping — `linkifyHtml('<script>alert(1)</script>')` must contain `&lt;script&gt;` and no raw `<script>` (`test/linkify.test.ts:49-53`); `javascript:` schemes must not produce anchors (`43-47`); quotes in URLs must not break out of the `href` attribute (`55-59`).
+**Re-run / dedupe tests:** `integration.test.ts` and `csv.test.ts` explicitly run `runParser`/`mergeCsv` twice and assert the second run adds **0** rows and the row count is unchanged (D-16), and that CSV stays sorted ascending by `timestamp_iso` (D-17).
 
-**Run hygiene:** every test that opens a server or mutates a global restores it, so the suite is order-independent and parallel-safe by design.
+**XSS / security tests:** `test/render.test.ts` ("XSS: adversarial content renders inert in all three outputs") and `test/linkify.test.ts` verify HTML/MD escaping, that `<script>` payloads never appear literally, and that `javascript:` hrefs are rejected.
+
+**Reading generated artifacts:** tests open the produced `messages.csv` / `messages.json` / `messages.md` / `messages.html` from disk and assert on them — renderers are verified through the real `runParser` path, not separately-imported render functions (except a few unit checks like `toRendered`, `renderMarkdown`, `renderHtml` called directly in `test/render.test.ts`).
+
+## Coverage
+
+**No coverage tooling is configured.** There is no `c8`/`nyc`/`vitest --coverage` step, and `package.json` has no `coverage` script. ESLint `recommended` does not enforce test presence. Coverage is *implicit* — the suite is organized to exercise each source module (`timestamp`, `message`/`classify`, `csv`, `media`, `title`, `render/*`, `linkify.js`) plus end-to-end integration paths.
+
+## CI Integration
+
+`.github/workflows/ci.yml` — a single `verify` job (plus a `publish` job gated on `v*` tags):
+```yaml
+strategy:
+  fail-fast: false
+  matrix:
+    node-version: [22.x, 24.x]
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-node@v4   # cache: npm
+  - run: npm ci
+  - run: npm run lint
+  - run: npm test
+  - run: npm run build
+```
+- The order `lint → test → build` means a lint failure blocks the test run.
+- `npm test` implicitly triggers `pretest` → `scripts/generate-fixtures.mjs`, so fixtures are always fresh in CI.
+- No coverage upload/gate, no test-report artifact published.
+- The `publish` job runs `npm publish --provenance --access public` only on tag push, using `secrets.NPM_TOKEN`.
 
 ---
 

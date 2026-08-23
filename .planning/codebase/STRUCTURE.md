@@ -6,148 +6,185 @@
 
 ```
 wa-backup/
-├── src/                      # TypeScript source (ESM, "type":"module")
-│   ├── index.ts              # CLI entry (commander), buildCli()
-│   ├── model.ts              # Orchestrator: runParser() + renderOutputs()
-│   ├── extract.ts            # ZIP streaming → _chat.txt lines; chat name/slug
-│   ├── media.ts              # Media reconcile + buildMediaMap + inline rules
-│   ├── title.ts              # URL→title enrichment (per-platform fetch)
-│   ├── csv.ts                # CSV source-of-truth read/write/merge
-│   ├── parse/                # Parsing sublayer
-│   │   ├── types.ts          # Message / MessageType model
-│   │   ├── timestamp.ts      # TS_RE, detectFormat, tryParseTimestamp
-│   │   └── message.ts        # parseMessages line state-machine
-│   └── render/               # Rendering sublayer
-│       ├── json.ts           # renderJson + buildEnvelope + dayOf/timeOf
-│       ├── md.ts             # renderMarkdown (day-sectioned log)
-│       ├── html.ts           # renderHtml (WhatsApp-style bubbles)
-│       ├── colors.ts         # accentHue / getAccentColor / initials
-│       └── js/               # Plain .js, Node + browser shared
-│           ├── linkify.js     # URL_RE, linkifyHtml/Markdown, deriveTitle
-│           ├── transcript.js  # browser viewer logic (search/filter/theme)
-│           └── xss-sanitize.js# textContent-only notes
-├── test/                     # Node:test suites (*.test.ts)
-├── dist/                     # tsup build output (gitignored-ish; bin target)
-├── out/ output/ backup/      # Generated sample outputs (per-run dirs)
-├── docs/                     # Project docs (superpowers plans/specs)
-├── tsup.config.ts            # Build config (ESM, node22, entry src/index.ts)
-├── tsconfig.json             # strict TS, Bundler resolution, include src+test
-└── package.json              # deps + scripts (dev/build/typecheck/test)
+├── src/                      # All TypeScript source (ESM, type: module)
+│   ├── index.ts              # CLI entry (commander), buildCli(), parseAsync
+│   ├── model.ts              # Orchestrator: runParser(), renderOutputs(), verboseReport()
+│   ├── extract.ts            # ZIP streaming of _chat.txt, chat-name/slug resolution
+│   ├── csv.ts                # CSV source-of-truth: escape, read, write, mergeCsv
+│   ├── media.ts              # ZIP central-dir parse, media reconcile, buildMediaMap
+│   ├── title.ts              # URL→title enrichment (per-platform fetchers)
+│   ├── parse/                # Streaming line parser + timestamp logic
+│   │   ├── message.ts        # State machine: parseMessages(), classifyType()
+│   │   ├── timestamp.ts      # TS_RE, detectFormat(), tryParseTimestamp()
+│   │   └── types.ts          # Message, MessageType contracts
+│   └── render/               # Output renderers
+│       ├── json.ts           # renderJson() -> messages.json
+│       ├── md.ts             # renderMarkdown() -> messages.md
+│       ├── html.ts           # renderHtml() -> messages.html (string template)
+│       ├── colors.ts         # accentHue(), getAccentColor(), initials()
+│       └── js/               # Browser-shared + client viewer JS
+│           ├── linkify.js     # URL_RE, deriveTitle, unwrapUrl, linkifyHtml/Markdown
+│           ├── transcript.js  # DOM viewer reading #chat-data island
+│           └── xss-sanitize.js# setText()/clear() safe DOM helpers
+├── test/                     # node:test suites (one file per concern)
+│   ├── integration.test.ts   # End-to-end: runParser over fixtures + dedupe/order
+│   ├── csv.test.ts           # CSV round-trip, dedupeKey, mergeCsv
+│   ├── timestamp.test.ts     # detectFormat / tryParseTimestamp
+│   ├── classify.test.ts      # classifyType, ATTACHED/OMITTED/DELETED
+│   ├── media.test.ts         # reconcileMedia, normalizeMediaName, buildMediaMap
+│   ├── title.test.ts         # enrichTitles, platform dispatch
+│   ├── render.test.ts        # JSON/MD/HTML output assertions
+│   ├── html-media.test.ts    # HTML media embeds/placeholders
+│   ├── theme.test.ts         # colors.ts accent/initials
+│   ├── linkify.test.ts       # linkify.js URL handling
+│   └── tracer.test.ts        # internal tracing/debug helper
+├── scripts/
+│   └── generate-fixtures.mjs  # Synthetic fixture generator (run via pretest)
+├── fixtures/                 # Generated synthetic chats + ZIPs (gitignored? see note)
+│   ├── WhatsApp Chat - Notas pessoais/   # _chat.txt + media files
+│   ├── WhatsApp Chat - Plataforma WK/    # _chat.txt + media files
+│   └── WhatsApp Chat - *.zip             # pre-built ZIPs for tests
+├── dist/                     # Built JS (tsup output; bin target)
+├── data/                     # Developer's real exports (gitignored, not used by tests)
+├── output/                   # Default CLI output dir (gitignored)
+├── .planning/                # GSD planning artifacts
+├── docs/                     # Distribution/docs notes
+├── package.json              # ESM, bin, scripts, deps
+├── tsconfig.json             # ES2022, strict, noEmit (tsup builds)
+├── tsup.config.ts            # Build config -> dist/index.js w/ shebang
+└── eslint.config.js          # ESLint 9 flat config (typescript-eslint)
 ```
 
 ## Directory Purposes
 
-**`src/` (root):**
-- Purpose: top-level pipeline modules (CLI, orchestrator, extraction, CSV, media, title).
-- Contains: `index.ts`, `model.ts`, `extract.ts`, `media.ts`, `title.ts`, `csv.ts`.
-- Key files: `src/model.ts` (orchestration), `src/csv.ts` (source-of-truth).
+**`src/` (and subdirs):**
+- Purpose: All application source. ESM modules, `"type": "module"`.
+- Contains: CLI, orchestrator, parsing, persistence, enrichment, rendering.
+- Key files: `src/index.ts`, `src/model.ts`, `src/parse/*`, `src/render/*`, `src/csv.ts`, `src/media.ts`, `src/title.ts`.
 
 **`src/parse/`:**
-- Purpose: the parsing sublayer — converting raw `_chat.txt` lines into `Message` objects.
-- Contains: `types.ts` (model), `timestamp.ts` (date detection/parsing), `message.ts` (line state-machine).
-- Key files: `src/parse/message.ts:82` `parseMessages`, `src/parse/timestamp.ts:92` `detectFormat`.
+- Purpose: The streaming parser and the data contract.
+- Contains: `message.ts` (state machine), `timestamp.ts` (detection + parsing), `types.ts` (`Message`/`MessageType`).
+- Key files: `src/parse/message.ts:82` (`parseMessages`), `src/parse/timestamp.ts:32` (`TS_RE`), `src/parse/types.ts:11` (`Message`).
 
 **`src/render/`:**
-- Purpose: the rendering sublayer — emitting the three synchronized outputs from the CSV.
-- Contains: `json.ts`, `md.ts`, `html.ts`, `colors.ts`, `js/` (shared browser-safe helpers).
-- Key files: `src/render/html.ts:248` `renderHtml`, `src/render/json.ts:79` `renderJson`.
+- Purpose: Emit the four synchronized outputs + shared client JS.
+- Contains: `json.ts`, `md.ts`, `html.ts`, `colors.ts`, `js/{linkify,transcript,xss-sanitize}.js`.
+- Key files: `src/render/json.ts:79` (`renderJson`), `src/render/md.ts:84` (`renderMarkdown`), `src/render/html.ts:248` (`renderHtml`).
 
 **`src/render/js/`:**
-- Purpose: plain `.js` modules safe to run in both Node and the browser (no `node:` imports).
-- Contains: `linkify.js` (shared by `html.ts`, `md.ts`, browser `transcript.js`), `transcript.js` (inlined into HTML), `xss-sanitize.js`.
-- Key files: `src/render/js/linkify.js` (`URL_RE`, `linkifyHtml`, `linkifyMarkdown`, `deriveTitle`).
+- Purpose: JavaScript modules shared between Node renderers (imported as `.js`) and the browser viewer. `linkify.js` is consumed by `html.ts`/`md.ts`/`transcript.js`; `transcript.js` is embedded into `messages.html` (`src/render/html.ts:264`); `xss-sanitize.js` provides safe `setText`/`clear` (`src/render/js/transcript.js:5`).
+- Contains: `linkify.js`, `transcript.js`, `xss-sanitize.js`.
 
 **`test/`:**
-- Purpose: `node --test` suites co-located by concern.
-- Contains: `classify.test.ts`, `csv.test.ts`, `html-media.test.ts`, `integration.test.ts`, `linkify.test.ts`, `media.test.ts`, `render.test.ts`, `theme.test.ts`, `timestamp.test.ts`, `title.test.ts`, `tracer.test.ts`.
+- Purpose: `node:test` suites run via `npm test` (which runs `pretest` → `generate-fixtures.mjs` first).
+- Contains: 11 `.test.ts` files; `integration.test.ts` is the authoritative end-to-end suite.
+- Key files: `test/integration.test.ts:61` (WK assertions), `test/integration.test.ts:123` (dedupe), `test/csv.test.ts`.
+
+**`scripts/`:**
+- Purpose: Build/tooling helpers. `generate-fixtures.mjs` writes synthetic `fixtures/` so CI needs no personal data.
+- Key files: `scripts/generate-fixtures.mjs:115` (`main()`).
+
+**`fixtures/`:**
+- Purpose: Synthetic WhatsApp exports (text + tiny placeholder media + ZIPs) for tests. Generated by `scripts/generate-fixtures.mjs`. Not committed personal data.
+- Contains: `WhatsApp Chat - Notas pessoais/`, `WhatsApp Chat - Plataforma WK/`, and matching `.zip` files.
 
 ## Key File Locations
 
 **Entry Points:**
-- `src/index.ts`: CLI entry (`buildCli().parseAsync(process.argv)` at `:78`); `bin.wa-backup` → `dist/index.js`.
-- `src/model.ts:83` `runParser`: programmatic entry to the full pipeline.
+- `src/index.ts` — CLI entry; `buildCli().parseAsync(process.argv)` at `src/index.ts:78`. Bin target `dist/index.js` (`package.json:7`).
+- `src/model.ts` — Programmatic API: `runParser`, `renderOutputs`.
 
 **Configuration:**
-- `package.json`: deps (`commander`, `date-fns`, `fflate`, `picocolors`), scripts (`dev`/`build`/`typecheck`/`test`).
-- `tsup.config.ts`: build entry `src/index.ts`, ESM, target `node22`, `outDir: dist`.
-- `tsconfig.json`: `strict: true`, `moduleResolution: Bundler`, `include: ["src","test"]`.
+- `package.json` — ESM, bin, scripts (`dev`/`build`/`test`/`lint`/`typecheck`), deps (`commander`, `date-fns`, `fflate`, `picocolors`).
+- `tsconfig.json` — `target ES2022`, `strict`, `noEmit`, `moduleResolution: Bundler`, `include: [src, test]`.
+- `tsup.config.ts` — bundles `src/index.ts` → `dist/`, injects shebang, `bin` entry.
+- `eslint.config.js` — ESLint 9 flat config with `typescript-eslint`.
 
 **Core Logic:**
-- `src/model.ts`: orchestration of extract → parse → merge → enrich → reconcile → render.
-- `src/csv.ts`: the canonical `messages.csv` read/write/merge.
-- `src/parse/message.ts`: the streaming `Message` parser.
+- `src/model.ts` — orchestration.
+- `src/parse/message.ts` — parsing state machine.
+- `src/csv.ts` — CSV source-of-truth + merge/dedupe.
 
-**Shared Abstractions:**
-- `src/parse/types.ts`: `Message` interface (the central data model).
-- `src/render/js/linkify.js`: link rendering shared everywhere.
+**Output Artifacts (per run):**
+- `<out>/<slug>/messages.csv` — source-of-truth.
+- `<out>/<slug>/messages.json` — `renderJson`.
+- `<out>/<slug>/messages.md` — `renderMarkdown`.
+- `<out>/<slug>/messages.html` — `renderHtml`.
+- `<out>/<slug>/media/` — reconciled media files (`src/media.ts:182`).
 
 **Testing:**
-- `test/` — `*.test.ts` run via `node --import tsx --test "test/*.test.ts"`.
+- `test/*.test.ts` — `node --import tsx --test "test/*.test.ts"` (`package.json:39`).
 
 ## Naming Conventions
 
 **Files:**
-- `kebab-case.ts` for source modules (e.g. `message.ts`, `timestamp.ts`, `media.ts`, `html.ts`, `json.ts`, `md.ts`).
-- Sublayer directories: `parse/` and `render/` group related modules.
-- Browser-shared helpers live in `render/js/` with a `.js` extension (not `.ts`) so they run untranspiled in the browser.
-- Test files mirror the unit under test: `<concern>.test.ts` (e.g. `csv.test.ts`, `title.test.ts`).
+- TypeScript modules: `kebab-case.ts` (e.g. `parse-messages` → here `message.ts`, `timestamp.ts`, `media.ts`).
+- Browser-shared JS: `kebab-case.js` (e.g. `linkify.js`, `transcript.js`, `xss-sanitize.js`).
+- Test files: mirror the concern, `kebab-case.test.ts` (e.g. `csv.test.ts`, `timestamp.test.ts`).
+- Fixtures: `WhatsApp Chat - <Name>/` (exact export naming, so `slugifyChatName` logic is exercised).
+- Output artifacts: fixed names `messages.csv` / `messages.json` / `messages.md` / `messages.html` (`src/csv.ts:51`, `src/render/json.ts:87`, `src/render/md.ts:123`, `src/render/html.ts:370`).
 
-**Exports / functions:**
-- Functions: `camelCase` verb phrases — `parseMessages`, `detectFormat`, `mergeCsv`, `enrichTitles`, `reconcileMedia`, `renderJson`, `renderHtml`, `buildEnvelope`, `buildMediaMap`, `slugifyChatName`.
-- Types / interfaces: `PascalCase` — `Message`, `MessageType`, `Detection`, `ParsedTimestamp`, `JsonEnvelope`, `RenderedMessage`, `MediaEntry`, `ReconcileResult`, `RunOptions`.
-- Constants: `SCREAMING_SNAKE` for regexes/enums — `TS_RE`, `SENDER_RE`, `ATTACHED_RE`, `OMITTED_RE`, `DELETED_RE`, `URL_RE`, `INLINE_MAX_BYTES`.
-- CSV column names: `snake_case` — `timestamp_iso`, `type`, `author`, `text`, `media`, `url_titles`.
+**Directories:**
+- `src/` subdirs are lower-case, single-word or short (`parse/`, `render/`, `render/js/`).
+- Output folders use the slugified chat name (`src/extract.ts:118` → e.g. `plataforma-wk`).
 
-**Streaming idiom:**
-- Async generators (`async function*`) for line/record streams: `parseMessages` (`src/parse/message.ts:82`), `readLines` (`src/extract.ts:73`).
-- Renderers follow a uniform signature: `(csvPath: string, outDir: string, chatName: string, opts?: {inline?: boolean}) => Promise<string>`.
+**Exports:**
+- Functions are `export function` (named exports), e.g. `export async function parseMessages`, `export async function runParser`.
+- Types are `export interface`/`export type` (`src/parse/types.ts`).
+- Constants like `TS_RE` (`src/parse/timestamp.ts:32`), `URL_RE` (`src/render/js/linkify.js:5`), `INLINE_MAX_BYTES` (`src/media.ts:13`) are `UPPER_SNAKE` `export const`.
+
+**Functions / variables:**
+- `camelCase` for functions/variables (`runParser`, `mergeCsv`, `reconcileMedia`, `dedupeKey`).
+- File-local helpers are `function` (module-private) unless exported.
+- `async` generators for streaming: `parseMessages` is `AsyncGenerator<Message>` (`src/parse/message.ts:82`); `extractChatTxt` returns `Promise<AsyncIterable<string>>` (`src/extract.ts:16`).
 
 ## Where to Add New Code
 
-**New output format (4th renderer):**
-- Implementation: `src/render/<format>.ts` exporting `render<Format>(csvPath, outDir, chatName, opts)` that calls `readCsv(csvPath)` + `buildMediaMap(outDir, messages)`.
-- Register it: add a call in `renderOutputs` (`src/model.ts:69-81`) and a summary line in `src/index.ts:63-68`.
-- Reuse: `dayOf`/`timeOf` (`src/render/json.ts:32`), `linkify.js` (`src/render/js/linkify.js`).
+**New message type / parsing rule:**
+- Parser state machine: `src/parse/message.ts` — extend `classifyType` (`src/parse/message.ts:40`) and the regexes (`SENDER_RE`, `ATTACHED_RE`, `OMITTED_RE`, `DELETED_RE`).
+- Add the type to `MessageType` union in `src/parse/types.ts:1`.
+- Keep the renderer branching in sync (search for `type === 'system' || type === 'deleted' || type === 'omitted'`).
 
-**New message type / classification:**
-- Implementation: extend `MessageType` in `src/parse/types.ts:1` and the classifier order in `classifyType` (`src/parse/message.ts:40`).
-- Adjust `MEDIA_ICON` maps in `src/render/html.ts:20` and `src/render/md.ts:23` if a bubble/label is needed.
+**New output format (e.g. PDF):**
+- Add `src/render/<fmt>.ts` exporting `async function render<Fmt>(csvPath, outDir, chatName, opts)`.
+- Wire it into `renderOutputs` (`src/model.ts:69`).
+- Add a test under `test/` (e.g. `render.test.ts`).
 
-**New timestamp locale:**
-- Implementation: extend `TS_RE` (`src/parse/timestamp.ts:32`) and the vote logic in `detectFormat` (`src/parse/timestamp.ts:92`); add a `resolveYear` edge case if needed.
+**New title-enrichment platform:**
+- Add dispatch branch + helpers in `src/title.ts` (`platformOf`, `fetchTitle`).
+- Reuse `extractTitle`/`metaContent` and the `urlTitles` column already in CSV (`src/csv.ts:45`).
 
-**New title-extraction platform:**
-- Implementation: add a branch in `platformOf` (`src/title.ts:61`) + a `fetch*`/`derive*` function, then wire it in `fetchTitle` (`src/title.ts:181`).
+**New media handling / inline rule:**
+- `src/media.ts`: `normalizeMediaName`, `mimeFromExt`, `isInlineable`, `INLINE_MAX_BYTES`.
 
-**New media handling:**
-- Implementation: `src/media.ts` — add MIME types to `MIME_BY_EXT` (`:28`), adjust `isInlineable` (`:51`), or refine `normalizeMediaName` (`:24`).
+**New test:**
+- `test/<concern>.test.ts`, import from `../src/<module>`. Use the synthetic fixtures (generated by `pretest`). For end-to-end, follow `test/integration.test.ts` (`run()` helper builds a ZIP from `fixtures/<chat>/_chat.txt`).
 
-**Utilities / shared helpers:**
-- Node-only helpers: add to the relevant `src/` module.
-- Node + browser helpers: add to `src/render/js/` as `.js` with **no `node:` imports** (so they can be inlined into the HTML).
-
-**Tests:**
-- Add `test/<concern>.test.ts` and ensure it matches the `test/*.test.ts` glob in `package.json`.
+**Utilities:**
+- Shared server/browser helpers go in `src/render/js/` (imported as `.js` so they load in both Node and browser). Pure Node helpers go in the relevant `src/*.ts`.
 
 ## Special Directories
 
+**`fixtures/`:**
+- Purpose: Synthetic test data.
+- Generated: Yes — by `scripts/generate-fixtures.mjs` via the `pretest` npm script.
+- Committed: Typically generated at test time; may be gitignored. Not derived from personal data.
+
 **`dist/`:**
-- Purpose: built ESM bundle from `tsup` (entry `dist/index.js`).
-- Generated: Yes (by `npm run build`).
-- Committed: No (build artifact).
+- Purpose: Built distributable (`tsup` output, includes `index.js` bin + `.d.ts`).
+- Generated: Yes (build artifact).
+- Committed: No (`files: ["dist"]` in `package.json` controls npm publish only).
 
-**`output/`, `out/`, `backup/`:**
-- Purpose: per-run generated backups (`<slug>/messages.csv`, `messages.json`, `messages.md`, `messages.html`, `media/`).
-- Generated: Yes (by `runParser` into `opts.out` default `output`).
-- Committed: No (runtime output; contains user data).
+**`data/` and `output/`:**
+- Purpose: Developer's real exports (`data/`) and default CLI output (`output/`).
+- Generated: `output/` at runtime.
+- Committed: No — both are gitignored (`git log` shows "gitignore generated backup/ output").
 
-**`src/render/js/`:**
-- Purpose: dual-runtime (Node + browser) JS.
-- Generated: No.
-- Committed: Yes — required at runtime (read from disk by `renderHtml` and executed in the browser).
-
-**`.planning/`, `_reversa*/`:**
-- Purpose: GSD planning artifacts and Reversa analysis (not application code).
+**`media/` (under each `<out>/<slug>/`):**
+- Purpose: Reconciled media files copied from the ZIP by `reconcileMedia`.
+- Generated: Yes, at run time.
+- Committed: No.
 
 ---
 

@@ -2,78 +2,108 @@
 
 **Analysis Date:** 2026-08-23
 
-All external interaction in this project is **read-only, outgoing, network-or-offline title enrichment** plus **local archive parsing**. There are no inbound webhooks, no auth providers, no databases, no write-back APIs, and no secrets. The single integration surface that touches the network is `src/title.ts`.
-
 ## APIs & External Services
 
-### Webpage Title Enrichment (`src/title.ts`)
+The only outbound network activity in the entire codebase is **optional webpage-title fetching** for shared links, implemented in `src/title.ts`. It is off by default? No — it is **ON by default** and disabled with `--no-fetch-titles` (`src/index.ts:22`, `src/model.ts:114-120`). When disabled, `enrichTitles` sets every message's `urlTitles = {}` and never calls `fetch` (`src/title.ts:269-273`).
 
-When the CLI runs WITHOUT `--no-fetch-titles`, it enriches every unique `http(s)` URL found in message text with a human-readable page title. Dispatch is per-platform via `platformOf(url)` (`src/title.ts:61`). Each special method falls back to a generic HTML fetch, which falls back to an offline-derived title (`fetchTitle`, `src/title.ts:181`).
+All calls use the **Node built-in global `fetch`** (no HTTP client dependency). Timeouts are enforced via `AbortController` + `setTimeout` (`src/title.ts:187-188`, `timeoutMs` default `5000`).
 
-| Platform | Method | Endpoint / Approach | Requires Network | Code |
-|----------|--------|---------------------|------------------|------|
-| **YouTube** | oEmbed JSON | `https://www.youtube.com/oembed?url=<encoded>&format=json` → `parseYouTubeOembed` | Yes | `youTubeOembedUrl` `src/title.ts:78`; fetch at `src/title.ts:197` |
-| **Reddit** | Append `.json` to the listing URL | `url.split('?')[0].replace(/\/$/, '') + '.json'` → `parseRedditJson` (reads `data.children[0].data.title`) | Yes | `redditJsonUrl` `src/title.ts:89`; fetch at `src/title.ts:209` (UA `wa-backup/1.0 (+title-extractor)`) |
-| **Stack Overflow** | Stack Exchange API v2.3 | `https://api.stackexchange.com/2.3/questions/<id>?site=stackoverflow` (id from `/\/questions\/(\d+)/`) → `parseStackOverflowJson` (reads `items[0].title`) | Yes | `stackExchangeApiUrl` `src/title.ts:133`; fetch at `src/title.ts:235` |
-| **Medium** | HTML GET with browser UA | `fetch(url, { headers: { 'User-Agent': UA } })` then `extractTitle` (prefers `og:title`/`twitter:title`, falls back to `<title>`) | Yes | `fetchMediumTitle` `src/title.ts:120` |
-| **LinkedIn** | URL slug derivation | No network — regex out `/in|pub|company/<slug>` or `/jobs/view/<slug>`, spaces from `_`/`-` | **No (offline)** | `deriveLinkedInTitle` `src/title.ts:104` |
-| **X / Twitter** | URL slug derivation | No network — `<user> on X` from first path segment | **No (offline)** | `deriveXTitle` `src/title.ts:146` |
-| **Generic (default + fallback)** | HTML GET with browser UA | `fetch(url, { redirect: 'follow', headers: { 'User-Agent': UA } })`, then `extractTitle` (`og:title` → `twitter:title` → `<title>`) | Yes | `fetchHtmlTitle` `src/title.ts:161` |
+Per-platform dispatch (`src/title.ts:181` `fetchTitle`):
 
-**Shared details:**
-- Browser-like User-Agent reduces bot-blocking: `UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'` (`src/title.ts:7`).
-- `extractTitle` (`src/title.ts:43`) parses `<meta property|name="og:title|twitter:title" content="…">` (either attribute order via `metaContent`, `src/title.ts:23`) then `<title>` (`TITLE_RE`, `src/title.ts:11`); `cleanTitle` truncates to 300 chars and strips control chars (`src/title.ts:13`).
-- `fetchTitle` is guarded by an `AbortController` + `setTimeout` (default `timeoutMs = 5000`) so a slow host never hangs the run (`src/title.ts:185-188`).
-- `enrichTitles` (`src/title.ts:260`) collects unique URLs, fetches them **in parallel** with a bounded worker pool (`concurrency` default 8), and maps results back onto each message's `urlTitles` (`Message.urlTitles`, `src/parse/types.ts:22`). When `enabled` is false, every message gets `urlTitles = {}` and no network is touched.
+| Platform (detected) | Integration | Endpoint / Method | Code |
+|---------------------|-------------|-------------------|------|
+| `youtube` | YouTube **oEmbed** (JSON) | `GET https://www.youtube.com/oembed?url=<enc>&format=json` | `youTubeOembedUrl` `src/title.ts:78`, `parseYouTubeOembed` `src/title.ts:82` |
+| `reddit` | Reddit **`.json` listing** | `GET <url>.json` (append `.json`, follow redirect) | `redditJsonUrl` `src/title.ts:89`, `parseRedditJson` `src/title.ts:93` |
+| `medium` | HTML scrape (browser UA) | `GET <url>` with `User-Agent: <browser>` | `fetchMediumTitle` `src/title.ts:120` |
+| `stackoverflow` | **Stack Exchange API** | `GET https://api.stackexchange.com/2.3/questions/<id>?site=stackoverflow` | `stackExchangeApiUrl` `src/title.ts:133`, `parseStackOverflowJson` `src/title.ts:139` |
+| `generic` | HTML `<title>` fetch | `GET <url>` (og:title / twitter:title / `<title>`) | `fetchHtmlTitle` `src/title.ts:161`, `extractTitle` `src/title.ts:43` |
+| `linkedin` | **Offline** — derive from URL slug | no network | `deriveLinkedInTitle` `src/title.ts:104` |
+| `x` (twitter) | **Offline** — derive from URL slug | no network | `deriveXTitle` `src/title.ts:146` |
+
+**Platform classification:** `platformOf(url)` (`src/title.ts:61`) matches hostname (strips `www.`). Hosts: `youtube.com`/`youtu.be`, `reddit.com`, `linkedin.com`, `medium.com`, `stackoverflow.com`, `x.com`/`twitter.com`; anything else → `generic`.
+
+**URL unwrapping:** LinkedIn redirect wrappers (`/safety/go/?url=`) are resolved to the real destination by `unwrapUrl` (`src/render/js/linkify.js:53`) before any fetch.
+
+**Concurrency:** unique URLs are fetched by `concurrency: 8` parallel promise workers (`src/title.ts:282-302`, `enrichTitles`). Each worker pulls the next URL from a shared cursor.
+
+**Fallback chain:** any platform-specific failure falls through to `fetchHtmlTitle`, then to an offline `deriveTitle` (`src/title.ts:246`, `src/title.ts:248`). Callers always get a usable label.
+
+**User agent:** a Chrome UA string (`src/title.ts:7-9`) is sent to reduce bot-blocking on Medium etc.; Reddit gets its own `wa-backup/1.0 (+title-extractor)` UA (`src/title.ts:211`).
 
 ## Data Storage
 
-**Databases:** None. No SQL/NoSQL, no ORM.
+**Databases:**
+- **None.** No SQL, NoSQL, or ORM. The "source-of-truth" is a local CSV file.
 
-**File Storage (local filesystem only):**
-- Input: a WhatsApp "Export chat" **ZIP** read from disk (`createReadStream` in `src/extract.ts:52` and `src/media.ts`).
-- Output: a folder `output/<slug>/` containing `messages.csv` (source-of-truth), `messages.json`, `messages.md`, `messages.html`, and `media/` (extracted attachments). No cloud storage. With `--inline`, media is base64-embedded into a single `messages.html` (`INLINE_MAX_BYTES = 8*1024*1024` cap, videos excluded — `src/media.ts:13`).
+**File formats consumed (input):**
 
-**Caching:** None. URLs are fetched once per run and held only in an in-memory `map` (`src/title.ts:281`).
+1. **WhatsApp "Export chat" ZIP** — a standard ZIP containing `_chat.txt` (the transcript) and optional media folders. Read two ways:
+   - Transcript: streamed via fflate `Unzip`/`AsyncUnzipInflate`, inflating **only** the `_chat.txt` entry (`src/extract.ts:16` `extractChatTxt`). AppleDouble (`._*`, `__MACOSX`) entries are skipped, never inflated (`src/extract.ts:25-27`).
+   - Media: central-directory scan with raw `node:fs` + `node:zlib.createInflateRaw` (`src/media.ts:76` `readCentralDirectory`, `src/media.ts:123` `extractEntry`). This avoids buffering the whole archive and works around fflate's data-descriptor bug.
+   - Chat name derived from ZIP entry names / filename (`src/extract.ts:118` `slugifyChatName`, `src/extract.ts:151` `chatNameFromZip`).
 
-## Archive / ZIP Handling (fflate)
+2. **Existing `messages.csv`** — re-read for incremental merge and re-render (`src/csv.ts:104` `readCsv`).
 
-- **Library:** `fflate` 0.8.3. Imported as `Unzip` + `AsyncUnzipInflate` (`src/extract.ts:1`).
-- **Streaming transcript extraction** (`src/extract.ts:extractChatTxt`): files are registered but only the `_chat.txt` entry calls `file.start()`; AppleDouble (`._*`, `__MACOSX`) and all media entries are skipped (never inflated) so large videos are never buffered. The inflated `_chat.txt` stream feeds a `PassThrough` → `node:readline` → an async-iterable line queue (`readLines`, `src/extract.ts:73`) — constant memory.
-- **Metadata-only scans** (`chatNameFromZip`, `chatInfoFromZip`, `src/extract.ts:151,177`): register `Unzip` but never call `file.start()`, so entry headers are read without inflating any bytes.
-- **Media extraction** (`src/media.ts`): a **separate hand-rolled ZIP central-directory parser** (`readCentralDirectory`, `src/media.ts:76`) reads the EOCD + central records to get each entry's authoritative `localOffset`/`compressedSize` (fflate's streaming inflate mis-handles data-descriptor members on real exports). Each media member is streamed entry-by-entry via `node:zlib` `createInflateRaw()` (method 8) or copied (method 0) — again, no whole-archive buffering.
+**File formats produced (output):** all written under `<out>/<slug>/` (default `output/<slug>/`, `src/model.ts:88-90`):
 
-## Browser View-Time Resources (passive, not CLI network calls)
+| File | Format | Producer | Notes |
+|------|--------|----------|-------|
+| `messages.csv` | CSV (RFC-4180-ish, custom escaping) | `src/csv.ts` (`writeCsv` `:124`, `mergeCsv` `:144`) | Authoritative model. Columns: `timestamp_iso,type,author,text,media,url_titles`. Stable ascending sort, dedup by `(timestamp_iso,author,text,media)` (`src/csv.ts:59` `dedupeKey`). |
+| `messages.json` | JSON envelope | `src/render/json.ts` (`buildEnvelope`) | `{ metadata, messages, urlTitles }`. Written to disk in `renderHtml`/`renderJson`. |
+| `messages.md` | Markdown | `src/render/md.ts` (`renderMarkdown`) | Linear transcript, one block per message, links via `linkifyMarkdown`. |
+| `messages.html` | Standalone HTML | `src/render/html.ts` (`renderHtml`) | Self-contained viewer: inlined CSS (`src/render/html.ts:215`), embedded `src/render/js/transcript.js`, JSON data island (`src/render/html.ts:293`). Opens from `file://` with no server. |
+| `media/` | Copied media files | `src/media.ts` (`reconcileMedia` `:171`, `buildMediaMap` `:236`) | Matched by tolerant name normalization (`normalizeMediaName` `src/media.ts:24`). Unresolved refs rendered as placeholders, never crash. |
+| `media/` (inline) | `data:` URIs (base64) | `src/render/html.ts` (`readFileAsDataUri` `:64`) | When `--inline`: files ≤ `INLINE_MAX_BYTES` (8 MiB, `src/media.ts:13`) and non-video inlined as `data:<mime>;base64,…`. |
 
-The generated `messages.html` viewer (`src/render/html.ts` + `src/render/js/transcript.js`) embeds, per link, an `<img class="favicon" src="/favicon.ico">` resolved from the URL host via `faviconFor` (`src/render/js/linkify.js:116`). This loads the target site's favicon **in the viewer's browser at open time** — it is not fetched by the Node CLI. The CLI itself performs no favicon requests.
+**Caching:**
+- None at the application layer. Per-run in-memory `Map` of URL→title (`src/title.ts:281` `map`) and media `Map` (`src/media.ts:236`).
 
 ## Authentication & Identity
 
-**Auth Provider:** None. No login, OAuth, API keys, or tokens anywhere. `src/title.ts` sets only a plain `User-Agent` header (no credentials); LinkedIn/X titles are derived offline without any API access.
+**Auth Provider:** None. No accounts, no tokens, no OAuth. The tool reads a local ZIP the user already possesses.
+
+**Secrets:** None required. No API keys are read (YouTube oEmbed, Reddit `.json`, Stack Exchange API are all **unauthenticated** public endpoints). No `.env` file exists in the repo.
 
 ## Monitoring & Observability
 
-**Error Tracking:** None (no Sentry/Datadog/telemetry).
+**Error Tracking:** None (no Sentry/Telemetry).
 
-**Logs:** `console.error`/`console.log` only, styled with `picocolors`. Verbose mode prints detected format/locale and per-URL title resolution (`src/title.ts:294`).
+**Logs:** Human-facing only, via `picocolors` on `stderr`/`stdout`:
+- Success/failure banners (`src/index.ts:58-71`).
+- Verbose format-detection report (`src/model.ts:27` `verboseReport`).
+- Per-URL title fetch in verbose mode (`src/title.ts:294`).
+- Media resolved/unresolved counts (`src/model.ts:143-154`).
 
 ## CI/CD & Deployment
 
-**Hosting:** Not hosted; distributed as an npm CLI (`bin.wa-backup → dist/index.js`). No Dockerfile, no `.github/` workflows detected.
+**Hosting:** npm registry (`npm install -g wa-backup` / `npx wa-backup`). No application hosting.
 
-**CI Pipeline:** None detected in the repo.
+**CI Pipeline:** `.github/workflows/ci.yml`:
+- `verify` job (Node `22.x`, `24.x` matrix): `npm ci` → `npm run lint` → `npm test` → `npm run build`.
+- `publish` job: on `v*` tags only, `npm publish --provenance` using `NPM_TOKEN` secret (OIDC `id-token: write`).
+
+**No Docker, no Kubernetes, no cloud deploy.** Pure npm package.
 
 ## Environment Configuration
 
 **Required env vars:** None.
 
-**Secrets location:** None — the project requires and stores no secrets (no `.env`, `.npmrc`, credential files present).
+**Optional runtime flags (not env vars):** `--zip`, `--out`, `--day-first`, `--month-first`, `--verbose`, `--inline`, `--no-fetch-titles` (all in `src/index.ts:16-22`).
+
+**Secrets location:** N/A — the only secret in the project is `NPM_TOKEN`, used solely by CI publish (`.github/workflows/ci.yml:50`), never by the CLI code.
 
 ## Webhooks & Callbacks
 
 **Incoming:** None.
 
-**Outgoing:** None, except the outbound `fetch()` calls enumerated above (YouTube oEmbed, Reddit `.json`, Stack Exchange API, Medium HTML, generic HTML). All are read-only GETs with no callbacks.
+**Outgoing:** None, except the **stateless outbound `fetch` calls** for title enrichment described above (YouTube oEmbed, Reddit, Medium, Stack Exchange API, generic `<title>`). No webhooks, no callbacks, no long-polling.
+
+## Security / Privacy Posture
+
+- **Local-first:** chat content never leaves the machine. The only network egress is the user's own shared links being resolved to readable titles (`README.md:148-151`).
+- **XSS-safe output:** all chat text is HTML-escaped before rendering (`escapeHtml` `src/render/html.ts:11`; `linkifyHtml` `src/render/js/linkify.js:71`). The JSON data island is escaped against `</script>` breakout (`src/render/html.ts:262` `.replace(/<\//g, '<\\/')`).
+- **Trusted data URIs:** base64 `data:` URIs are built only from local media bytes, never from chat text (`src/render/html.ts:70`).
+- **Opt-out:** `--no-fetch-titles` guarantees zero network calls (`src/title.ts:269-273`).
 
 ---
 

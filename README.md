@@ -1,5 +1,7 @@
 # wa-backup
 
+[![CI](https://github.com/guionardo/wa-backup/actions/workflows/ci.yml/badge.svg)](https://github.com/guionardo/wa-backup/actions/workflows/ci.yml)
+
 Turn a WhatsApp **"Export chat"** ZIP into a self-contained, no-server backup of a single
 conversation. It emits three synchronized outputs — **Markdown**, a **WhatsApp-like HTML**
 viewer, and structured **JSON** — plus a `messages.csv` source-of-truth, with media
@@ -7,6 +9,14 @@ reconciled and optionally inlined.
 
 Everything runs **locally on your machine**. Your chat never leaves your computer (see
 [FAQ](#faq)).
+
+## Why
+
+I keep chats and groups that are no longer active, but I don't want to lose them — and my
+phone needs the space back. WhatsApp's "Export chat" gives you a ZIP, but the raw `_chat.txt`
+is clumsy to read later and still assumes you have WhatsApp installed. **wa-backup** turns that
+export into a portable, easily-viewed backup (Markdown, HTML, JSON) you can open in any browser
+years from now — no phone, no account, no WhatsApp required.
 
 ## Features
 

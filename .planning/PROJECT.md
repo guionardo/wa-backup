@@ -8,6 +8,15 @@ A TypeScript/Node command-line tool that reads the official WhatsApp chat-export
 
 A person can open their WhatsApp history years later and see the full conversation — text and media together — without needing WhatsApp, a phone, or any account.
 
+## Motivation
+
+Some chats and groups are no longer active, but their history is still worth keeping — or the
+phone needs the storage space back. Exporting and deleting them from the device is easy; the
+hard part is that the raw WhatsApp export is awkward to read later and stays tied to having
+WhatsApp installed. This tool exists to turn that export into a portable, easily-viewed backup
+(Markdown, HTML, JSON) you can open in any browser — freeing the phone without losing the
+conversation.
+
 ## Requirements
 
 ### Validated

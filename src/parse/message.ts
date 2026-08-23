@@ -156,7 +156,7 @@ export async function* parseMessages(
   };
 
   // Emitting inside a generator via callback closure.
-  let queue: Message[] = [];
+  const queue: Message[] = [];
   function emit(m: Message) {
     queue.push(m);
   }

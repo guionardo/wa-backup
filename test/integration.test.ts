@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { zipSync } from 'fflate';
+import { createServer } from 'node:http';
 import { runParser } from '../src/model';
 import { slugifyChatName } from '../src/extract';
 
@@ -184,4 +185,51 @@ test('G-01-16: root-level _chat.txt derives chat name from ZIP basename', async 
   assert.ok(fs.existsSync(csvPath), `expected CSV at ${csvPath}`);
   const records = parseCsv(fs.readFileSync(csvPath, 'utf8')).slice(1);
   assert.ok(records.length > 0);
+});
+
+test('url titles: fetched + persisted to CSV/JSON/HTML', async () => {
+  const srv = await new Promise<{ url: string; close: () => void }>((resolve) => {
+    const s = createServer((_q, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end('<title>Mock Title</title>');
+    });
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address() as { port: number };
+      resolve({ url: `http://127.0.0.1:${port}/p`, close: () => s.close() });
+    });
+  });
+  try {
+    const chat = 'WhatsApp Chat - UrlTitle IT';
+    const txt = `23/07/2026 09:47 - Owner: see ${srv.url}\n`;
+    const zipped = zipSync({ [`${chat}/_chat.txt`]: Buffer.from(txt, 'utf8') });
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-ut-'));
+    const zipPath = path.join(tmp, 'e.zip');
+    fs.writeFileSync(zipPath, Buffer.from(zipped));
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-ut-out-'));
+    await runParser(zipPath, { out });
+    const dir = path.join(out, slugifyChatName(chat));
+    const csv = fs.readFileSync(path.join(dir, 'messages.csv'), 'utf8');
+    assert.ok(csv.includes('url_titles'), 'CSV has url_titles column');
+    assert.ok(csv.includes('Mock Title'), 'CSV stores fetched title');
+    const env = JSON.parse(fs.readFileSync(path.join(dir, 'messages.json'), 'utf8'));
+    assert.equal(env.messages[0].urlTitles[srv.url], 'Mock Title');
+    const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
+    assert.ok(html.includes('>Mock Title</a>'), 'HTML link uses fetched title');
+  } finally {
+    srv.close();
+  }
+});
+
+test('url titles: --no-fetch-titles leaves urlTitles empty (offline)', async () => {
+  const chat = 'WhatsApp Chat - UrlTitle Off';
+  const txt = `23/07/2026 09:47 - Owner: see https://example.com/x\n`;
+  const zipped = zipSync({ [`${chat}/_chat.txt`]: Buffer.from(txt, 'utf8') });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-ut2-'));
+  const zipPath = path.join(tmp, 'e.zip');
+  fs.writeFileSync(zipPath, Buffer.from(zipped));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-ut2-out-'));
+  await runParser(zipPath, { out, noFetchTitles: true });
+  const dir = path.join(out, slugifyChatName(chat));
+  const env = JSON.parse(fs.readFileSync(path.join(dir, 'messages.json'), 'utf8'));
+  assert.deepEqual(env.messages[0].urlTitles, {});
 });

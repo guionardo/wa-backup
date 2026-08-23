@@ -19,6 +19,7 @@ export function buildCli() {
     .option('--month-first', 'force month/day date order')
     .option('--verbose', 'report detected format, locale guess, overrides')
   .option('--inline', 'embed resolved media as base64 into a single self-contained HTML file')
+  .option('--no-fetch-titles', 'skip fetching webpage titles (offline)')
     .addHelpText(
       'after',
       `
@@ -48,6 +49,7 @@ Note the "--" in the npm form: without it, npm swallows flags like --verbose.`,
           monthFirst: Boolean(opts.monthFirst),
           verbose: Boolean(opts.verbose),
           inline: Boolean(opts.inline),
+          noFetchTitles: Boolean((opts as Record<string, unknown>).noFetchTitles ?? (opts as Record<string, unknown>).fetchTitles === false),
         });
         const { slug } = await chatInfoFromZip(zip);
         const outDir = (opts.out as string | undefined) ?? 'output';

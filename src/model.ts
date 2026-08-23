@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import pc from 'picocolors';
 import { extractChatTxt, chatInfoFromZip } from './extract';
 import { parseMessages } from './parse/message';
-import { mergeCsv } from './csv';
+import { mergeCsv, readCsv, writeCsv } from './csv';
 import { renderJson } from './render/json';
 import { renderMarkdown } from './render/md';
 import { renderHtml } from './render/html';
@@ -19,6 +19,8 @@ export interface RunOptions {
   verbose?: boolean;
   /** Embed resolved media as base64 `data:` URIs into a single HTML file. */
   inline?: boolean;
+  /** Skip fetching webpage titles (offline). URL→title map stays empty. */
+  noFetchTitles?: boolean;
 }
 
 /** D-07 — transparency report for the detected file format. */
@@ -105,6 +107,13 @@ export async function runParser(
   // Incremental merge into the CSV source-of-truth (D-13/D-16/D-17):
   // re-runs dedupe against existing rows and keep the file sorted ascending.
   const added = await mergeCsv(path.join(dir, 'messages.csv'), messages);
+
+  // TITLE-ENRICH (always on; opt-out via --no-fetch-titles): fetch webpage
+  // titles and persist the URL→title map back into the CSV source-of-truth.
+  const { enrichTitles } = await import('./title.js');
+  const merged = readCsv(path.join(dir, 'messages.csv'));
+  await enrichTitles(merged, { enabled: !opts.noFetchTitles, concurrency: 8, timeoutMs: 5000 });
+  await writeCsv(path.join(dir, 'messages.csv'), merged);
 
   // MEDIA-01/02: reconcile referenced media and copy matched files to
   // <dir>/media/. Never throws on unresolved — missing refs are reported and

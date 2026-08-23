@@ -14,10 +14,83 @@ export function extractTitle(html: string): string | null {
     .slice(0, 300);
 }
 
+export type Platform = 'youtube' | 'reddit' | 'linkedin' | 'generic';
+
+/** Classify a URL so each host can use its own title-extraction method. */
+export function platformOf(url: string): Platform {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, '');
+    if (h === 'youtube.com' || h === 'youtu.be' || h.endsWith('.youtube.com')) return 'youtube';
+    if (h === 'reddit.com' || h.endsWith('.reddit.com')) return 'reddit';
+    if (h === 'linkedin.com' || h.endsWith('.linkedin.com')) return 'linkedin';
+    return 'generic';
+  } catch {
+    return 'generic';
+  }
+}
+
+// ---- YouTube: official oEmbed endpoint (JSON) ----
+
+export function youTubeOembedUrl(url: string): string {
+  return `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+}
+
+export function parseYouTubeOembed(obj: unknown): string | null {
+  const title = (obj as { title?: unknown })?.title;
+  return typeof title === 'string' && title.trim() ? title.trim() : null;
+}
+
+// ---- Reddit: append `.json` and read the listing ----
+
+export function redditJsonUrl(url: string): string {
+  return url.split('?')[0].replace(/\/$/, '') + '.json';
+}
+
+export function parseRedditJson(obj: unknown): string | null {
+  try {
+    const title = (obj as any[])?.[0]?.data?.children?.[0]?.data?.title;
+    return typeof title === 'string' && title.trim() ? title.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---- LinkedIn: no scraping — derive from the URL slug (offline) ----
+
+export function deriveLinkedInTitle(url: string): string | null {
+  try {
+    const path = new URL(url).pathname;
+    const m =
+      path.match(/\/(?:in|pub|company)\/([^/?#]+)/) ??
+      path.match(/\/jobs\/view\/([^/?#]+)/);
+    if (!m) return null;
+    const slug = m[1].replace(/[_]+/g, ' ').replace(/-/g, ' ').trim();
+    return slug || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Generic HTML <title> fetch (used by default and as a fallback). */
+async function fetchHtmlTitle(
+  url: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const res = await fetch(url, { signal, redirect: 'follow' });
+  if (!res.ok) return null;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct && !/html/i.test(ct)) return null;
+  return extractTitle(await res.text());
+}
+
 /**
- * Fetch the page title for a single URL. On any failure (network error,
- * non-OK status, non-HTML content-type, missing/empty title) returns the
- * offline-derived title so callers always get a usable label.
+ * Fetch the page title for a single URL, dispatching per platform:
+ * - youtube  -> oEmbed JSON (falls back to generic HTML <title>)
+ * - reddit   -> `.json` listing (falls back to generic HTML <title>)
+ * - linkedin -> slug-derived, offline (no network)
+ * - generic  -> HTML <title>
+ * Any failure returns the offline-derived title so callers always get a
+ * usable label.
  */
 export async function fetchTitle(
   url: string,
@@ -27,12 +100,40 @@ export async function fetchTitle(
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ac.signal, redirect: 'follow' });
-    if (!res.ok) return deriveTitle(url);
-    const ct = res.headers.get('content-type') ?? '';
-    if (ct && !/html/i.test(ct)) return deriveTitle(url);
-    const html = await res.text();
-    return extractTitle(html) ?? deriveTitle(url);
+    const platform = platformOf(url);
+
+    if (platform === 'linkedin') {
+      return deriveLinkedInTitle(url) ?? deriveTitle(url);
+    }
+
+    if (platform === 'youtube') {
+      try {
+        const res = await fetch(youTubeOembedUrl(url), { signal: ac.signal });
+        if (res.ok) {
+          const t = parseYouTubeOembed(await res.json());
+          if (t) return t;
+        }
+      } catch {
+        // fall through to generic HTML title
+      }
+    }
+
+    if (platform === 'reddit') {
+      try {
+        const res = await fetch(redditJsonUrl(url), {
+          signal: ac.signal,
+          headers: { 'User-Agent': 'wa-backup/1.0 (+title-extractor)' },
+        });
+        if (res.ok) {
+          const t = parseRedditJson(await res.json());
+          if (t) return t;
+        }
+      } catch {
+        // fall through to generic HTML title
+      }
+    }
+
+    return (await fetchHtmlTitle(url, ac.signal)) ?? deriveTitle(url);
   } catch {
     return deriveTitle(url);
   } finally {
@@ -42,8 +143,9 @@ export async function fetchTitle(
 
 /**
  * Enrich messages with a URL→title map. Unique http(s) URLs are fetched once
- * (bounded concurrency), then mapped back onto each message. When `enabled`
- * is false, every message gets `urlTitles = {}` and no network is touched.
+ * and **in parallel** via concurrent promise workers (bounded by
+ * `concurrency`), then mapped back onto each message. When `enabled` is false,
+ * every message gets `urlTitles = {}` and no network is touched.
  */
 export async function enrichTitles(
   messages: Message[],
@@ -60,15 +162,20 @@ export async function enrichTitles(
   const map: Record<string, string> = {};
   const concurrency = Math.max(1, opts.concurrency ?? 8);
   let cursor = 0;
-  async function worker() {
-    while (cursor < urls.length) {
-      const url = urls[cursor++];
-      map[url] = await fetchTitle(url, { timeoutMs: opts.timeoutMs });
-    }
+  // Each worker pulls the next URL and awaits its fetch; the workers run
+  // concurrently, so distinct URLs are resolved as parallel promises.
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(concurrency, urls.length || 1); i++) {
+    workers.push(
+      (async () => {
+        while (cursor < urls.length) {
+          const url = urls[cursor++];
+          map[url] = await fetchTitle(url, { timeoutMs: opts.timeoutMs });
+        }
+      })(),
+    );
   }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, urls.length || 1) }, worker),
-  );
+  await Promise.all(workers);
   for (const m of messages) {
     if (!m.text) {
       m.urlTitles = {};

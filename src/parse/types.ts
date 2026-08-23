@@ -18,4 +18,6 @@ export interface Message {
   text: string;
   /** Media filename or '' (D-14) */
   media: string;
+  /** Per-URL fetched page titles (enrichment); `{}` when absent/disabled. */
+  urlTitles?: Record<string, string>;
 }

@@ -81,10 +81,10 @@ test('Plataforma WK: header + no BOM + ISO timestamps', async () => {
   );
 
   const text = raw.toString('utf8');
-  assert.equal(text.split('\n')[0], 'timestamp_iso,type,author,text,media');
+  assert.equal(text.split('\n')[0], 'timestamp_iso,type,author,text,media,url_titles');
 
   for (const rec of parseCsv(text).slice(1)) {
-    assert.equal(rec.length, 5, `row must have 5 fields: ${rec[0]}`);
+    assert.equal(rec.length, 6, `row must have 6 fields: ${rec[0]}`);
     assert.match(rec[0], ISO_RE, `timestamp must be local ISO, got: ${rec[0]}`);
     assert.doesNotMatch(rec[0], /Z|[+-]\d{2}:?\d{2}$/, 'no timezone allowed');
   }

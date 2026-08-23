@@ -54,7 +54,7 @@ function csvPathFor(out: string, chat: string): string {
 function assertNoBom(out: string, chat: string) {
   const raw = fs.readFileSync(csvPathFor(out, chat));
   assert.equal(raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
-  assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media');
+  assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media,url_titles');
 }
 
 test('Plataforma WK: authoritative end-to-end assertions', async () => {

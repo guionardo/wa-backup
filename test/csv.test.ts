@@ -87,7 +87,7 @@ test('merged file keeps header + no BOM (D-19)', async () => {
   const file = tmpCsv();
   await mergeCsv(file, [msg('2026-01-01T00:00:00', 'text', 'A', 'x')]);
   const raw = fs.readFileSync(file);
-  assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media');
+  assert.equal(raw.toString('utf8').split('\n')[0], 'timestamp_iso,type,author,text,media,url_titles');
   assert.equal(raw.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false);
 });
 
@@ -104,9 +104,13 @@ test('G-01-4: CR/LF escaped — one physical line per row, lossless round-trip',
   const raw = fs.readFileSync(file, 'utf8');
   assert.equal(raw.split('\n').length - 1, rows.length + 1);
 
-  // Round-trip: readCsv restores the exact original strings.
+  // Round-trip: readCsv restores the exact original strings (plus the
+  // always-present empty urlTitles map).
   const back = readCsv(file);
-  assert.deepEqual(back, rows);
+  assert.deepEqual(
+    back,
+    rows.map((r) => ({ ...r, urlTitles: {} })),
+  );
 });
 
 test('G-01-4: merge re-write keeps escaping stable (write->read->write)', async () => {
@@ -116,4 +120,32 @@ test('G-01-4: merge re-write keeps escaping stable (write->read->write)', async 
   const back = readCsv(file);
   assert.equal(back[0].text, 'x\ny');
   assert.equal(back[1].text, 'p\\q');
+});
+
+test('url_titles: round-trips as a JSON map', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-csvurl-'));
+  const p = path.join(dir, 'messages.csv');
+  const m: Message = {
+    timestamp_iso: '2026-07-23T09:47:18',
+    type: 'text',
+    author: 'Guionardo',
+    text: 'see https://example.com/page',
+    media: '',
+    urlTitles: { 'https://example.com/page': 'Example Page' },
+  };
+  await writeCsv(p, [m]);
+  const back = readCsv(p);
+  assert.equal(back.length, 1);
+  assert.deepEqual(back[0].urlTitles, { 'https://example.com/page': 'Example Page' });
+});
+
+test('url_titles: legacy 5-column row parses with empty urlTitles', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-csvurl2-'));
+  const p = path.join(dir, 'messages.csv');
+  fs.writeFileSync(
+    p,
+    'timestamp_iso,type,author,text,media\n2026-07-23T09:47:18,text,Guionardo,hi,\n',
+  );
+  const back = readCsv(p);
+  assert.deepEqual(back[0].urlTitles, {});
 });

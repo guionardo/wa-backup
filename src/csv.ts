@@ -32,14 +32,23 @@ function unescapeField(s: string): string {
   return out;
 }
 
+function jsonOrEmpty(s: string): Record<string, string> {
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? (v as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function csvRow(m: Message): string {
-  return [m.timestamp_iso, m.type, m.author, m.text, m.media]
+  return [m.timestamp_iso, m.type, m.author, m.text, m.media, JSON.stringify(m.urlTitles ?? {})]
     .map(csvField)
     .join(',') + '\n';
 }
 
 export function csvHeader(): string {
-  return 'timestamp_iso,type,author,text,media\n';
+  return 'timestamp_iso,type,author,text,media,url_titles\n';
 }
 
 /**
@@ -103,6 +112,7 @@ export function readCsv(path: string): Message[] {
       author: unescapeField(rec[2]),
       text: unescapeField(rec[3]),
       media: unescapeField(rec[4]),
+      urlTitles: rec.length >= 6 ? jsonOrEmpty(unescapeField(rec[5])) : {},
     });
   }
   return out;

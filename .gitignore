@@ -9,3 +9,6 @@ output/
 
 # GSD ephemeral research cache
 .planning/research/.cache/
+
+# Generated backup output
+backup/

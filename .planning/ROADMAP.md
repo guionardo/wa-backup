@@ -2,7 +2,7 @@
 
 ## Overview
 
-This roadmap delivers a TypeScript/Node CLI that turns a WhatsApp "Export chat" ZIP (`_chat.txt` + media folders) into a self-contained, no-server backup of a single conversation — emitting three synchronized outputs (Markdown, WhatsApp-like HTML, structured JSON) with media reconciled and optionally inlined. The four phases proceed in dependency order: first the parsing core that produces an accurate, locale-tolerant normalized model; then the three-output renderers; then media reconciliation and inline embedding; finally the CLI surface and portable delivery. Together they satisfy all 19 v1 requirements and realize the core value — opening a full chat years later, text and media together, without WhatsApp, a phone, or an account.
+This roadmap delivers a TypeScript/Node CLI that turns a WhatsApp "Export chat" ZIP (`_chat.txt` + media folders) into a self-contained, no-server backup of a single conversation — emitting three synchronized outputs (Markdown, WhatsApp-like HTML, structured JSON) with media reconciled and optionally inlined. The three phases proceed in dependency order: first the parsing core that produces an accurate, locale-tolerant normalized model; then the three-output renderers; then media reconciliation and inline embedding. Together they satisfy the v1 requirements and realize the core value — opening a full chat years later, text and media together, without WhatsApp, a phone, or an account.
 
 ## Phases
 
@@ -68,18 +68,6 @@ Plans:
 
 - [x] 03-01-PLAN.md — Media reconciliation & embedding: enumerate+match+copy media from ZIP (streaming), disk-resident media map, JSON `mediaPath` + MD links + HTML `<img>/<video>/<a>`, `--inline` base64 with size cap, placeholder preservation for omitted/deleted/missing
 
-### Phase 4: CLI & Portable Delivery
-
-**Goal:** The tool is a usable CLI that writes to a sensible default location, supports an explicit override, and produces a backup that opens with no server or backend.
-**Mode:** mvp
-**Success Criteria**:
-
-1. Output defaults to a folder named after the chat inside the current/output directory when no path is given.
-2. A `--out` flag redirects all generated outputs to a user-specified path.
-3. Opening any generated output (Markdown, HTML, or JSON) via `file://` works with no server, backend, or account required.
-
-**Requirements:** CLI-01, CLI-02, CLI-03
-
 ## Phase Summary
 
 | # | Phase | Goal | Requirements | Success Criteria |
@@ -87,15 +75,3 @@ Plans:
 | 1 | Parsing & Model Core | Read a WhatsApp export ZIP into a normalized, locale-tolerant message model | PARSE-01, PARSE-02, PARSE-03, PARSE-04, PARSE-05, PARSE-06, PARSE-07 | 4 |
 | 2 | Multi-Format Rendering | Emit JSON + Markdown + WhatsApp-like HTML in one XSS-safe run | OUT-01, OUT-02, OUT-03, OUT-04, OUT-05 | 4 |
 | 3 | Media Reconciliation & Embedding | Locate, copy, and optionally inline media; preserve placeholders | MEDIA-01, MEDIA-02, MEDIA-03, MEDIA-04 | 4 (1/1 plans) |
-| 4 | CLI & Portable Delivery | Sensible default output, `--out` override, no-server portability | CLI-01, CLI-02, CLI-03 | 3 |
-
-### Phase 5: Plan phase 2: Multi-format rendering
-
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 4
-**Plans:** 0 plans
-
-Plans:
-
-- [ ] TBD (run /gsd-plan-phase 5 to break down)

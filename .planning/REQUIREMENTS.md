@@ -94,15 +94,15 @@ Which phases cover which requirements. Populated during roadmap creation.
 | MEDIA-02 | Phase 3 | Pending |
 | MEDIA-03 | Phase 3 | Pending |
 | MEDIA-04 | Phase 3 | Pending |
-| CLI-01 | Phase 4 | Pending |
-| CLI-02 | Phase 4 | Pending |
-| CLI-03 | Phase 4 | Pending |
+| CLI-01 | — | Implemented (no phase) |
+| CLI-02 | — | Implemented (no phase) |
+| CLI-03 | — | Implemented (no phase) |
 
 **Coverage:**
 
 - v1 requirements: 19 total
-- Mapped to phases: 19
-- Unmapped: 0 ✓
+- Mapped to phases: 16
+- Unmapped: 3 (CLI-01, CLI-02, CLI-03 — implemented, no owning phase)
 
 ---
 *Requirements defined: 2026-08-21*

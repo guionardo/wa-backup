@@ -125,3 +125,20 @@ test('render: URLs become links in HTML + Markdown; JSON text unchanged', async 
     'JSON text unchanged',
   );
 });
+
+// ---- resolver override ----
+
+test('linkify: resolver overrides the displayed title', () => {
+  const out = linkifyHtml('go https://example.com/x', (u) =>
+    u.includes('example.com') ? 'Fetched Title' : u,
+  );
+  assert.ok(out.includes('>Fetched Title</a>'), 'html uses resolver label');
+  assert.ok(out.includes('href="https://example.com/x"'), 'href unchanged');
+  const md = linkifyMarkdown('go https://example.com/x', () => 'Fetched Title');
+  assert.ok(md.includes('[Fetched Title](https://example.com/x)'), 'md uses resolver label');
+});
+
+test('linkify: resolver defaults to deriveTitle when omitted', () => {
+  const out = linkifyHtml('see https://example.com/path');
+  assert.ok(out.includes('>example.com/path</a>'), 'falls back to derived title');
+});

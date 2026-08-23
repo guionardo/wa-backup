@@ -2,7 +2,7 @@
 // Shared by the Node renderers (html.ts, md.ts) and the browser viewer
 // (transcript.js). No network access: titles are derived from the URL only.
 
-const URL_RE = /(https?:\/\/[^\s<>"'`]+)/gi;
+export const URL_RE = /(https?:\/\/[^\s<>"'`]+)/gi;
 
 function escapeHtml(s) {
   return s
@@ -44,8 +44,9 @@ export function deriveTitle(url) {
 }
 
 /** Escape text and wrap http(s) URLs in safe <a> anchors. */
-export function linkifyHtml(text) {
+export function linkifyHtml(text, resolver) {
   if (!text) return '';
+  const resolve = resolver ?? deriveTitle;
   const re = new RegExp(URL_RE.source, 'gi');
   let result = '';
   let last = 0;
@@ -54,7 +55,7 @@ export function linkifyHtml(text) {
     result += escapeHtml(text.slice(last, m.index));
     const url = trimTrailingPunct(m[0]);
     const href = escapeHtml(url);
-    const title = escapeHtml(deriveTitle(url));
+    const title = escapeHtml(resolve(url));
     result += `<a href="${href}" target="_blank" rel="noopener noreferrer">${title}</a>`;
     last = m.index + m[0].length;
   }
@@ -63,8 +64,9 @@ export function linkifyHtml(text) {
 }
 
 /** Escape text and wrap http(s) URLs in Markdown `[title](url)` links. */
-export function linkifyMarkdown(text) {
+export function linkifyMarkdown(text, resolver) {
   if (!text) return '';
+  const resolve = resolver ?? deriveTitle;
   const re = new RegExp(URL_RE.source, 'gi');
   let result = '';
   let last = 0;
@@ -72,7 +74,7 @@ export function linkifyMarkdown(text) {
   while ((m = re.exec(text)) !== null) {
     result += escapeMd(text.slice(last, m.index));
     const url = trimTrailingPunct(m[0]);
-    const title = deriveTitle(url).replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+    const title = resolve(url).replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
     const safeUrl = url.replace(/\\/g, '\\\\').replace(/\)/g, '\\)');
     result += `[${title}](${safeUrl})`;
     last = m.index + m[0].length;

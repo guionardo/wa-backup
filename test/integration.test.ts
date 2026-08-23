@@ -102,17 +102,17 @@ test('Notas pessoais: authoritative end-to-end assertions', async () => {
   assertNoBom(out, NOTAS);
 
   // Line 1 text; line 18 document omitted w/ full marker; line 37 sticker.
-  assert.ok(records.some((r) => r[0] === '2026-03-17T13:17:58' && r[3] === 'https://lefthook.dev/'));
+  assert.ok(records.some((r) => r[0] === '2026-03-17T13:17:59' && r[3] === 'https://lefthook.dev/'));
   assert.ok(records.some((r) => r[1] === 'omitted' && r[3].includes('autorizacao_atividade.pdf') && r[3].includes('document omitted')));
-  assert.ok(records.some((r) => r[0] === '2026-04-03T15:17:11' && r[1] === 'sticker' && r[4] === '00000008-STICKER-2026-04-03-15-17-12.webp'));
+  assert.ok(records.some((r) => r[0] === '2026-04-03T15:17:12' && r[1] === 'sticker' && r[4] === '00000008-STICKER-2026-04-03-15-17-12.webp'));
 
   // Line 124 caption+attachment photo; line 196 IRPF document attach.
-  assert.ok(records.some((r) => r[0] === '2026-05-29T17:23:36' && r[1] === 'photo' && r[3] === 'Taxa João Furlan'));
+  assert.ok(records.some((r) => r[0] === '2026-05-29T17:23:37' && r[1] === 'photo' && r[3] === 'Taxa João Furlan'));
   assert.ok(records.some((r) => r[1] === 'document' && r[4].startsWith('00000152-96980389904-IRPF')));
 
   // Lines 14/15 deleted/omitted respectively.
-  assert.ok(records.some((r) => r[0] === '2026-03-25T19:52:15' && r[1] === 'deleted'));
-  assert.ok(records.some((r) => r[0] === '2026-03-25T19:52:28' && r[1] === 'omitted'));
+  assert.ok(records.some((r) => r[0] === '2026-03-25T19:52:16' && r[1] === 'deleted'));
+  assert.ok(records.some((r) => r[0] === '2026-03-25T19:52:29' && r[1] === 'omitted'));
 
   // All types within the locked 8.
   const allowed = new Set(['text','photo','video','sticker','document','system','deleted','omitted']);

@@ -56,7 +56,7 @@ test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {
   // Line 6: `image omitted` -> omitted, marker preserved as text.
   assert.ok(
     records.some(
-      (r) => r[0] === '2026-03-20T16:20:21' && r[1] === 'omitted' && r[3].includes('image omitted'),
+      (r) => r[0] === '2026-03-20T16:20:22' && r[1] === 'omitted' && r[3].includes('image omitted'),
     ),
     'line 6 image omitted',
   );
@@ -64,7 +64,7 @@ test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {
   // Line 14: `Mensagem apagada` -> deleted.
   assert.ok(
     records.some(
-      (r) => r[0] === '2026-03-25T19:52:15' && r[1] === 'deleted' && r[3] === 'Mensagem apagada',
+      (r) => r[0] === '2026-03-25T19:52:16' && r[1] === 'deleted' && r[3] === 'Mensagem apagada',
     ),
     'line 14 deleted',
   );
@@ -72,7 +72,7 @@ test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {
   // Line 15: `sticker omitted` -> omitted.
   assert.ok(
     records.some(
-      (r) => r[0] === '2026-03-25T19:52:28' && r[1] === 'omitted' && r[3].includes('sticker omitted'),
+      (r) => r[0] === '2026-03-25T19:52:29' && r[1] === 'omitted' && r[3].includes('sticker omitted'),
     ),
     'line 15 sticker omitted',
   );
@@ -81,7 +81,7 @@ test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {
   assert.ok(
     records.some(
       (r) =>
-        r[0] === '2026-03-28T07:15:44' &&
+        r[0] === '2026-03-28T07:15:45' &&
         r[1] === 'omitted' &&
         r[3].includes('autorizacao_atividade.pdf') &&
         r[3].includes('document omitted') &&
@@ -95,7 +95,7 @@ test('Notas: omitted/deleted/system/document types (PARSE-07)', async () => {
   assert.ok(
     records.some(
       (r) =>
-        r[0] === '2026-07-30T21:44:35' &&
+        r[0] === '2026-07-30T21:44:36' &&
         r[1] === 'document' &&
         r[3] === '96980389904-IRPF-D-0-0211-31-07-2026-08-03.pdf • \u200e1 página' &&
         r[4].startsWith('00000152-96980389904-IRPF'),

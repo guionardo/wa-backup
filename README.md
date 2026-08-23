@@ -37,16 +37,26 @@ years from now — no phone, no account, no WhatsApp required.
 
 ## Installation
 
-Install globally:
+Install globally with your preferred package manager:
 
 ```bash
-npm install -g wa-backup
+npm install -g wa-backup       # npm
+pnpm add -g wa-backup          # pnpm
+bun install -g wa-backup       # bun
 ```
 
-Or run it on demand without installing, via `npx`:
+Then run it from anywhere:
 
 ```bash
-npx wa-backup "WhatsApp Chat - X.zip"
+wa-backup "WhatsApp Chat - X.zip"
+```
+
+Or run it on demand without installing, via your package manager's runner:
+
+```bash
+npx wa-backup "WhatsApp Chat - X.zip"        # npm
+pnpm dlx wa-backup "WhatsApp Chat - X.zip"   # pnpm
+bunx wa-backup "WhatsApp Chat - X.zip"       # bun
 ```
 
 ## Quick start

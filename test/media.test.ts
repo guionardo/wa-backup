@@ -17,6 +17,7 @@ import {
   buildMediaMap,
   setActiveReconcileMap,
 } from '../src/media';
+import { readManifest } from '../src/media-manifest';
 
 const ROOT = process.cwd();
 const NOTAS_ZIP = path.join(ROOT, 'fixtures', 'WhatsApp Chat - Notas pessoais.zip');
@@ -79,7 +80,10 @@ test('reconcileMedia on Notas pessoais sample: 17 resolved, 0 unresolved', async
   const res = await reconcileMedia(NOTAS_ZIP, outDir, refs);
   assert.equal(res.resolved.length, 17, 'all 17 refs resolved');
   assert.equal(res.unresolved.length, 0, 'no unresolved refs');
-  const files = fs.readdirSync(path.join(outDir, 'media')).sort();
+  const files = fs
+    .readdirSync(path.join(outDir, 'media'))
+    .filter((f) => f !== 'manifest.json' && !f.startsWith('.tmp-'))
+    .sort();
   assert.ok(files.length >= 1 && files.length <= 17, 'files collapsed to CAS names');
   for (const f of files) {
     assert.ok(
@@ -109,7 +113,9 @@ test('CAS: byte-identical different names stored once, both refs resolve', async
   fs.writeFileSync(zp, z);
   const o = fs.mkdtempSync(path.join(os.tmpdir(), 'o-'));
   const res = await reconcileMedia(zp, o, ['A.png', 'B.png']);
-  const files = fs.readdirSync(path.join(o, 'media'));
+  const files = fs
+    .readdirSync(path.join(o, 'media'))
+    .filter((f) => f !== 'manifest.json' && !f.startsWith('.tmp-'));
   assert.equal(files.length, 1, 'one canonical file (dedup)');
   assert.equal(res.mediaMap.size, 2, 'both refs recorded');
   const ra = res.mediaMap.get('A.png')!.relPath;
@@ -121,6 +127,18 @@ test('CAS: byte-identical different names stored once, both refs resolve', async
   ] as unknown as Message[];
   const m = buildMediaMap(o, messages);
   assert.equal(m.get('A.png')!.relPath, m.get('B.png')!.relPath);
+
+  // Manifest coverage: one entry per original ref, shared hash/relPath,
+  // duplicatesRemoved === 1, bytesSaved > 0 (bytesSaved>0 required case).
+  const manifest = readManifest(path.join(o, 'media', 'manifest.json'));
+  assert.equal(manifest.entries.length, 2, 'one manifest entry per ref');
+  assert.equal(manifest.duplicatesRemoved, 1, 'one duplicate removed');
+  assert.ok(manifest.bytesSaved > 0, 'bytes saved > 0');
+  const ea = manifest.entries.find((e) => e.ref === 'A.png')!;
+  const eb = manifest.entries.find((e) => e.ref === 'B.png')!;
+  assert.equal(ea.relPath, eb.relPath, 'manifest entries share relPath');
+  assert.equal(ea.hash, eb.hash, 'manifest entries share hash');
+  assert.equal(ea.hash.length, 64, 'manifest stores full 64-hex sha256');
 });
 
 test('buildMediaMap: resolves disk files tolerant of (1) variance + inlineable flag', () => {

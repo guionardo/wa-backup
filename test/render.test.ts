@@ -88,8 +88,12 @@ test('WK: Markdown day sections, format, media, deleted', async () => {
     'first message format',
   );
   assert.ok(
-    md.includes('![00003010-STICKER-2026-07-23-12-41-49.webp](media/00003010-STICKER-2026-07-23-12-41-49.webp)'),
-    'sticker embedded as Markdown image',
+    /!\[[^\]]*\]\(media\/[0-9a-f]{16}\.webp\)/.test(md),
+    'sticker embedded as Markdown image (content-addressed path)',
+  );
+  assert.ok(
+    !md.includes('](media/00003010-STICKER-2026-07-23-12-41-49.webp)'),
+    'original media filename not used as the media path',
   );
   assert.ok(md.includes('*Mensagem apagada*'), 'deleted message italic');
 });

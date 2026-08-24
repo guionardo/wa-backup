@@ -80,6 +80,13 @@ export async function renderOutputs(
   return result;
 }
 
+/** Render a byte count as a compact human string (e.g. "4.2 MB"). */
+function formatBytes(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} MB`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)} KB`;
+  return `${n} bytes`;
+}
+
 export async function runParser(
   zipPath: string,
   opts: RunOptions = {},
@@ -139,13 +146,25 @@ export async function runParser(
   }
 
   // MEDIA-03 reporting: surface resolved/unresolved counts on stderr so the
-  // JSON/MD/HTML artifacts stay clean (D-M7).
-  if (opts.verbose || mediaReport.resolved.length + mediaReport.unresolved.length > 0) {
+  // JSON/MD/HTML artifacts stay clean (D-M7). Also surface dedup savings
+  // whenever duplicates were removed this run.
+  if (
+    opts.verbose ||
+    mediaReport.resolved.length + mediaReport.unresolved.length > 0 ||
+    mediaReport.duplicatesRemoved > 0
+  ) {
     // eslint-disable-next-line no-console
     console.error(
       pc.dim('[wa-backup] media:') +
         ` ${mediaReport.resolved.length} resolved` +
-        `, ${mediaReport.unresolved.length} unresolved`,
+        `, ${mediaReport.unresolved.length} unresolved` +
+        (mediaReport.duplicatesRemoved > 0
+          ? pc.cyan(
+              ` ${mediaReport.duplicatesRemoved} duplicate(s) removed (${formatBytes(
+                mediaReport.bytesSaved,
+              )} saved)`,
+            )
+          : ''),
     );
     for (const u of mediaReport.unresolved) {
       // eslint-disable-next-line no-console

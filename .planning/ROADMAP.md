@@ -45,8 +45,9 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
   1. After a run, `media/manifest.json` exists and lists every resolved media ref with `{ relPath, hash, size, mime }`; refs that are byte-identical share the same `relPath`.
   2. Re-rendering from `messages.csv` + the output folder (no ZIP — e.g. a later `--inline` re-render) still resolves all media correctly, because `buildMediaMap` looks the ref up in the manifest instead of guessing by filename.
   3. Two runs on the same ZIP produce a byte-identical `media/` folder (idempotent) — the canonical file for a duplicate set is always the first-occurring ref by stable message order.
-  4. A pre-v1.1 backup (media named by original filename, no manifest) still renders correctly via the legacy directory-scan fallback inside `buildMediaMap`, keeping existing `test/media.test.ts` assertions green.
-**Plans**: TBD
+   4. A pre-v1.1 backup (media named by original filename, no manifest) still renders correctly via the legacy directory-scan fallback inside `buildMediaMap`, keeping existing `test/media.test.ts` assertions green.
+**Plans**: 1 plan
+- [ ] 05-01-PLAN.md — media/manifest.json bridge: new src/media-manifest.ts, reconcileMedia writes manifest (atomic), buildMediaMap manifest-first with legacy fallback, runParser dedup report, tests keep legacy assertions green
 
 ### Phase 6: Savings Report, `--no-dedupe`, & Tests
 **Goal**: Users see how much space dedup saved, can opt out of dedup to keep per-ref filenames, and the whole feature is certified by an integration + unit test suite.
@@ -64,7 +65,7 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 4. Streaming Hash & Content-Addressed Store | 0/1 | Not started | - |
-| 5. Manifest Bridge & Deterministic Canonical Selection | 0/TBD | Not started | - |
+| 5. Manifest Bridge & Deterministic Canonical Selection | 1/TBD | Not started | - |
 | 6. Savings Report, `--no-dedupe`, & Tests | 0/TBD | Not started | - |
 
 ---

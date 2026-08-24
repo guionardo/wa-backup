@@ -39,13 +39,28 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Check tag matches package version
+        id: ver
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "package version: $PKG"
+          echo "tag version:     $TAG"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "Tag version ($TAG) does not match package version ($PKG) — skipping publish."
+          fi
       - uses: actions/setup-node@v4
+        if: steps.ver.outputs.skip != '1'
         with:
           node-version: 22.x
           registry-url: 'https://registry.npmjs.org'
           cache: npm
       - run: npm ci
+        if: steps.ver.outputs.skip != '1'
       - run: npm run build
+        if: steps.ver.outputs.skip != '1'
       - run: npm publish --provenance --access public
+        if: steps.ver.outputs.skip != '1'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

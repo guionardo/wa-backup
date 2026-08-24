@@ -41,12 +41,12 @@ Which phases cover which requirements (filled by the roadmap).
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MEDIA-05 | — | Planned |
-| MEDIA-06 | — | Planned |
-| MEDIA-07 | — | Planned |
-| MEDIA-08 | — | Planned |
-| MEDIA-09 | — | Planned |
-| MEDIA-10 | — | Planned |
+| MEDIA-05 | Phase 4 | Planned |
+| MEDIA-06 | Phase 4 | Planned |
+| MEDIA-07 | Phase 5 | Planned |
+| MEDIA-08 | Phase 5 | Planned |
+| MEDIA-09 | Phase 6 | Planned |
+| MEDIA-10 | Phase 6 | Planned |
 
 ---
 *Requirements defined: 2026-08-24 for v1.1 (Media Hygiene)*

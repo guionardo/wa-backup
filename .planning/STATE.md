@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Media Hygiene
 status: planning
-last_updated: "2026-08-24T10:53:51.142Z"
+last_updated: "2026-08-24T08:10:00.000Z"
 last_activity: 2026-08-24
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,7 +19,7 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-08-21)
 **Core value:** A person can open their WhatsApp history years later and see the full conversation — text and media together — without needing WhatsApp, a phone, or any account.
-**Current focus:** Phase 03 — media-reconciliation-embedding
+**Current focus:** Phase 4 — streaming-hash-content-addressed-store (v1.1 Media Hygiene)
 
 ## Phase Status
 
@@ -28,39 +28,34 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 | 1 | ✓ Complete | 7/7 | 100% |
 | 2 | ✓ Complete | 1/1 | 100% |
 | 3 | ✓ Complete | 1/1 | 100% |
+| 4 | ○ Not started | 0/TBD | 0% |
+| 5 | ○ Not started | 0/TBD | 0% |
+| 6 | ○ Not started | 0/TBD | 0% |
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 4 (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-08-24 — Milestone v1.1 started
+Status: Planning v1.1 roadmap
+Last activity: 2026-08-24 — Milestone v1.1 (Media Hygiene) roadmap drafted (Phases 4-6)
 
 ## Active Feature
 
-Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
+Phase 04 streaming-hash-content-addressed-store — MEDIA-05/MEDIA-06: SHA-256 Transform in `extractEntry` + CAS naming `media/<sha256[:16]>.<ext>` in `reconcileMedia`.
 
 ## Recent Activity
 
-- 2026-08-21: Phase 1 UAT COMPLETE — all 20 tests resolved, all 6 gaps fixed & retested.
-- 2026-08-21: 01-07 gap closure complete — real output path in success message.
-- 2026-08-21: 01-06 gap closure complete — slugged chat-name folders.
-- 2026-08-21: 01-05 gap closure complete — chat name from ZIP basename.
-- 2026-08-21: 01-04 gap closure complete — CSV escaping + CLI flag reachability.
-- 2026-08-21: Phase 1 VERIFIED — goal achieved, all gates green.
-- 2026-08-21: 01-03 complete — CSV merge/dedupe + authoritative integration suite.
-- 2026-08-21: 01-02 complete — locale detection + type classification.
-- 2026-08-21: 01-01 complete — streaming tracer parser + real-sample integration tests.
-- 2026-08-21: Project initialized; requirements defined; roadmap created.
-- 2026-08-22: Phase 2 COMPLETE — 02-01 multi-format rendering (JSON+MD+HTML, XSS-safe) shipped; 37 tests pass.
-- 2026-08-22: Phase 3 PLANNED — 03-01 media reconciliation & embedding (MEDIA-01..04): copy media, relative refs, `--inline` base64, placeholder preservation.
-- 2026-08-22: Phase 3 COMPLETE — 03-01 media reconciliation & embedding shipped; 43 tests pass (37 existing + 6 new); `wa-backup <zip>` copies 17 media files + `--inline` self-contained HTML.
+- 2026-08-24: Milestone v1.1 "Media Hygiene" started — research synthesis complete (HIGH confidence).
+- 2026-08-24: Roadmap v1.1 drafted — Phase 4 (MEDIA-05/06), Phase 5 (MEDIA-07/08), Phase 6 (MEDIA-09/10 + tests). 100% requirement coverage.
+- 2026-08-22: Phase 3 COMPLETE — media reconciliation & embedding shipped; 43 tests pass.
+- 2026-08-22: Phase 2 COMPLETE — multi-format rendering shipped; 37 tests pass.
+- 2026-08-21: Phase 1 VERIFIED — streaming tracer parser + CSV source-of-truth.
 
 ## Session
 
-**Last session:** 2026-08-21T20:10:33.125Z
-**Stopped at:** Phase 2 context gathered
-**Resume file:** .planning/phases/02-multi-format-rendering/02-CONTEXT.md
+**Last session:** 2026-08-24T08:10:00.000Z
+**Stopped at:** v1.1 roadmap drafted
+**Resume file:** .planning/phases/04-streaming-hash-content-addressed-store/ (to be created)
 
 ## Performance Metrics
 
@@ -85,11 +80,12 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - [Phase 02]: metadata.chatName = display name (e.g. "Plataforma WK"); folder = slug (plataforma-wk)
 - [Phase 02]: Outgoing side = most-frequent author (no self marker in export); SHA-256(author)%360 -> hue
 - [Phase 02]: eta 4.6 unavailable offline -> HTML shell via inline TS templates (deviation)
-- [Phase 03]: reconcileMedia reads the ZIP central directory (random-access) + streams each member via Node `zlib.createInflateRaw` — required because fflate's streaming inflate breaks on data-descriptor members (the sample's nested `.zip` attachment), so the planned fflate `file.start()` path was replaced (deviation, Rule 1)
+- [Phase 03]: reconcileMedia reads the ZIP central directory (random-access) + streams each member via Node `zlib.createInflateRaw` — fflate streaming inflate breaks on data-descriptor members (deviation, Rule 1)
 - [Phase 03]: match by entry BASENAME (not full path) so zips with a folder prefix also reconcile (MEDIA-01 robustness)
 - [Phase 03]: disk-resident `buildMediaMap(dir, messages)` decouples renderers from the zip — re-render from CSV works without the archive (D-M5)
 - [Phase 03]: `--inline` embeds inlineable files (< 8 MiB, non-video) as `data:` URIs; video/oversized stay placeholders; unresolved refs reported to stderr, never crash (MEDIA-03/04)
+- [Phase 04-06 v1.1]: SHA-256 via `node:crypto` streaming Transform in `extractEntry` (constant memory); CAS `media/<sha256[:16]>.<ext>`; no hardlinks/symlinks; `media/manifest.json` regenerated every run from refs (messages.csv stays source-of-truth); first-occurrence canonical selection; `--no-dedupe` opt-out (research: HIGH confidence)
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Begin Phase 4 with /gsd-plan-phase 4

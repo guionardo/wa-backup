@@ -6,6 +6,12 @@ import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import type { Message } from './parse/types';
+import {
+  writeManifest,
+  readManifest,
+  legacyScan,
+  type MediaManifestEntry,
+} from './media-manifest';
 
 export const MEDIA_HASH_PREFIX_LEN = 16;
 
@@ -176,6 +182,10 @@ export interface ReconcileResult {
   unresolved: string[];
   /** Every resolved ref -> its canonical content-addressed MediaEntry. */
   mediaMap: Map<string, MediaEntry>;
+  /** Refs mapped onto an already-committed hash during this run. */
+  duplicatesRemoved: number;
+  /** Approx sum of sizes of deduped refs. */
+  bytesSaved: number;
 }
 
 let activeReconcileMap: Map<string, MediaEntry> | null = null;
@@ -225,6 +235,16 @@ export async function reconcileMedia(
   const resolvedSet = new Set<string>();
   const resolved: string[] = [];
   const mediaMap = new Map<string, MediaEntry>();
+
+  // Dedup bookkeeping + the persisted manifest (D-05.1 / D-05.2).
+  // Keyed on the canonical on-disk name (hash[:16]+ext), so byte-identical
+  // refs sharing an extension collapse to one file, while same-content
+  // different-extension files each keep a resolvable file (P4 edge case).
+  const committedNames = new Set<string>();
+  let duplicatesRemoved = 0;
+  let bytesSaved = 0;
+  const manifestEntries: MediaManifestEntry[] = [];
+
   const writes: Promise<void>[] = [];
   for (const [norm, refList] of refsByNorm) {
     const meta = index.get(norm);
@@ -238,10 +258,24 @@ export async function reconcileMedia(
           const { hash, size } = await extractEntry(zipPath, meta, tmp);
           const canonicalName = canonicalMediaName(hash, ext);
           const canonicalPath = path.join(mediaDir, canonicalName);
-          if (fs.existsSync(canonicalPath)) {
+          const alreadyCommitted = committedNames.has(canonicalName);
+          if (alreadyCommitted) {
+            // Byte-identical content already on disk: discard temp, count every
+            // ref in this group as a duplicate (D-05.2: still recorded below).
             fs.unlinkSync(tmp);
+            duplicatesRemoved += refList.length;
+            bytesSaved += refList.length * size;
           } else {
-            fs.renameSync(tmp, canonicalPath);
+            if (fs.existsSync(canonicalPath)) {
+              fs.unlinkSync(tmp); // D-04 trust-stream: no rewrite
+            } else {
+              fs.renameSync(tmp, canonicalPath);
+            }
+            committedNames.add(canonicalName);
+            // Within-norm redundancy: multiple distinct original refs that
+            // normalize equal (e.g. photo.jpg + photo (1).jpg).
+            duplicatesRemoved += Math.max(0, refList.length - 1);
+            bytesSaved += Math.max(0, refList.length - 1) * size;
           }
           const mime = mimeFromExt(ext);
           const entry: MediaEntry = {
@@ -249,6 +283,7 @@ export async function reconcileMedia(
             mime,
             size,
             inlineable: isInlineable(mime, size),
+            hash,
           };
           for (const ref of refList) {
             mediaMap.set(ref, entry);
@@ -256,6 +291,14 @@ export async function reconcileMedia(
               resolvedSet.add(ref);
               resolved.push(ref);
             }
+            // One manifest entry per original ref (D-05.2).
+            manifestEntries.push({
+              ref,
+              hash,
+              relPath: `media/${canonicalName}`,
+              size,
+              mime,
+            });
           }
         } catch (err) {
           try {
@@ -273,8 +316,19 @@ export async function reconcileMedia(
   const unresolved = [...refsByNorm.values()].flat().filter(
     (r) => !resolvedSet.has(r),
   );
+
+  // Persist the ref -> canonical-file bridge (always write, atomic).
+  writeManifest(mediaDir, {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    entries: manifestEntries,
+    unresolved,
+    duplicatesRemoved,
+    bytesSaved,
+  });
+
   setActiveReconcileMap(mediaMap);
-  return { resolved, unresolved, mediaMap };
+  return { resolved, unresolved, mediaMap, duplicatesRemoved, bytesSaved };
 }
 
 export interface MediaEntry {
@@ -284,6 +338,8 @@ export interface MediaEntry {
   /** Whether this file may be inlined as a `data:` URI (D-M6). */
   inlineable: boolean;
   size: number;
+  /** Full 64-hex SHA-256 carried from the manifest; renderers ignore it. */
+  hash?: string;
 }
 
 /**
@@ -299,43 +355,59 @@ export function buildMediaMap(
   messages: Message[],
 ): Map<string, MediaEntry> {
   const mediaDir = path.join(dir, 'media');
-  let entries: fs.Dirent[] = [];
-  try {
-    entries = fs.readdirSync(mediaDir, { withFileTypes: true });
-  } catch {
-    return new Map();
+  const manifestPath = path.join(mediaDir, 'manifest.json');
+
+  // --- Manifest-first (authoritative / exclusive) -------------------------
+  // If a manifest exists, it is the source of truth: a ref present in the
+  // manifest but whose file is missing on disk is treated as absent
+  // (placeholder), never re-scanned (D-05.2 carry-over).
+  if (fs.existsSync(manifestPath)) {
+    let manifest: ReturnType<typeof readManifest> | null = null;
+    try {
+      manifest = readManifest(manifestPath);
+    } catch {
+      manifest = null; // corrupt manifest -> fall through to legacy scan
+    }
+    if (manifest) {
+      const byRef = new Map(manifest.entries.map((e) => [e.ref, e]));
+      const map = new Map<string, MediaEntry>();
+      for (const m of messages) {
+        if (!m.media) continue;
+        const e = byRef.get(m.media);
+        if (!e) continue; // absent-but-expected: placeholder
+        if (!fs.existsSync(path.join(mediaDir, path.basename(e.relPath)))) {
+          continue; // file missing on disk -> absent (exclusive)
+        }
+        map.set(m.media, {
+          relPath: e.relPath,
+          mime: e.mime,
+          size: e.size,
+          inlineable: isInlineable(e.mime, e.size),
+          hash: e.hash,
+        });
+      }
+      return map;
+    }
   }
 
-  const index = new Map<string, string>(); // normalized -> actual filename
-  for (const e of entries) {
-    if (e.isDirectory()) continue;
-    if (e.name.startsWith('._')) continue;
-    index.set(normalizeMediaName(e.name), e.name);
+  // --- In-run bridge (Phase 4 activeReconcileMap) -------------------------
+  if (activeReconcileMap) {
+    const map = new Map<string, MediaEntry>();
+    for (const m of messages) {
+      if (!m.media) continue;
+      const e = activeReconcileMap.get(m.media);
+      if (e) map.set(m.media, e);
+    }
+    return map;
   }
 
+  // --- Legacy directory-scan fallback (pre-v1.1 folders, no manifest) -----
+  const legacy = legacyScan(mediaDir);
   const map = new Map<string, MediaEntry>();
   for (const m of messages) {
     if (!m.media) continue;
-    if (activeReconcileMap && activeReconcileMap.has(m.media)) {
-      map.set(m.media, activeReconcileMap.get(m.media)!);
-      continue;
-    }
-    const hit = index.get(normalizeMediaName(m.media));
-    if (!hit) continue; // missing-but-expected: not in map
-    const full = path.join(mediaDir, hit);
-    let size = 0;
-    try {
-      size = fs.statSync(full).size;
-    } catch {
-      continue;
-    }
-    const mime = mimeFromExt(path.extname(hit));
-    map.set(m.media, {
-      relPath: `media/${hit}`,
-      mime,
-      size,
-      inlineable: isInlineable(mime, size),
-    });
+    const e = legacy.get(normalizeMediaName(m.media));
+    if (e) map.set(m.media, e);
   }
   return map;
 }

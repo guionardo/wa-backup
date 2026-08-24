@@ -43,7 +43,7 @@ conversation.
 - ✓ Output defaults to a chat-named folder; `--out` overrides it — v1.0
 - ✓ Web link titles resolved (YouTube/Reddit/LinkedIn/Medium/Stack Overflow/X) — v1.0
 
-### Active (next milestone)
+### Active (v1.1 — Media Hygiene, in planning)
 
 - [ ] Media deduplication: verify media by size + hash to detect duplicates and save disk space
 - [ ] (propose more in `/gsd-new-milestone`)
@@ -82,5 +82,22 @@ conversation.
 | Media reconciliation via ZIP central directory + random-access inflate | fflate streaming inflate breaks on data-descriptor members (nested `.zip` attachment) | ✓ Good (deviation from planned fflate streaming) |
 | URL title enrichment with `--no-fetch-titles` opt-out | Local-only by default; titles optional, network-off capable | ✓ Good |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-08-24 after v1.0 milestone*
+*Last updated: 2026-08-24 after v1.0 milestone; v1.1 (Media Hygiene) started*

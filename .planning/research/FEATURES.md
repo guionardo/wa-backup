@@ -1,139 +1,211 @@
-# Feature Landscape: WhatsApp Chat-Export Parser / Backup Tool
+# Feature Landscape: Media Deduplication (v1.1 — "Media Hygiene")
 
-**Domain:** CLI tool that turns a WhatsApp "Export chat" ZIP (`_chat.txt` + media folders) into Markdown + HTML + JSON with media
-**Researched:** 2026-08-21
-**Research mode:** Ecosystem (features dimension)
-**Overall confidence:** MEDIUM (format/structure facts corroborated across many independent tools; some provider tiers LOW — treat tool-specific claims as indicative, not authoritative)
+**Domain:** Disk-space optimization feature for an existing TypeScript/Node ESM CLI (`wa-backup`) that parses WhatsApp "Export chat" ZIPs and emits Markdown/HTML/JSON backups with reconciled media.
+**Researched:** 2026-08-24
+**Research mode:** Ecosystem (features dimension), scoped to the v1.1 deduplication requirement
+**Overall confidence:** HIGH for the *mechanism* (corroborated across multiple independent production backup tools and a reference Rust implementation); MEDIUM for exact code-path integration (that is phase-level research, flagged below).
 
 ---
 
 ## Executive Summary
 
-The WhatsApp chat-export ecosystem is mature and crowded, but it fragments along two axes: **what input it reads** and **what output it produces**.
+The requirement is concrete and well-understood: **verify each reconciled media file by its size + a cryptographic hash, and when two referenced files are byte-identical, store the bytes exactly once and point every reference at that single copy.** This is whole-file, content-addressed deduplication. It is a solved, low-risk problem with a clear canonical shape, so the research value here is in scoping *what not to build* and pinning down *end-user behavior* — not in discovering new technique.
 
-- **Input axis:** The most capable tools (e.g. `WhatsApp-Chat-Exporter`, Python) parse the *local database* and even *decrypt* Google-Drive-style backups (Crypt12/14/15). That is a completely different and far larger problem than this project's scope. Our project deliberately targets only the **email/export ZIP** (`_chat.txt` + media), which is plain UTF-8 text plus sibling media files. This is the right, lean boundary.
-- **Output axis:** There are txt→object parsers (`whatsapp-chat-parser`, npm, ~219★, TypeScript), txt→document converters (`whatsapp-export-md`, Python 2025; `whatsapp-chat-to-pdf`), database tools, analytics tools (`WhatsR`, `whatsapp-chat-analyzer`), and online converters (ChatToPDF, WAExport, ThreadRecap) that emit PDF/Excel/CSV. **No single popular tool cleanly does all three of Markdown + WhatsApp-like HTML + structured JSON in one local, portable, no-server pass** — that combination is our wedge.
+The dominant pattern in every mature dedup tool (Borg, restic, zbackup, GitLab Artifact Registry, `dedup.rs`, `fdupes`-style scripts) is a **two-stage filter**:
+1. **Group by size.** Files with a unique size *cannot* be duplicates, so they are copied as-is and never hashed.
+2. **Hash only the size-collision groups.** Within a group of same-size files, compute a cryptographic digest (SHA-256) and group by digest; every digest group with >1 member is a duplicate set.
 
-The single hardest, non-negotiable feature is **locale-tolerant timestamp parsing**. The `_chat.txt` date format changes by device, OS region, and language (e.g. `14/06/2026, 21:07` in the EU vs `6/14/26, 9:07 PM` in the US; separators `- / .`; optional brackets). A parser that assumes one format breaks on others. The second universal gotcha is **multi-line message continuation** (only the first line carries a timestamp). Solve these two and you solve ~95% of real-world parsing bugs (corroborated by whatsquiz format guide and StackOverflow war-stories).
+For `wa-backup` the right storage model is **content-addressed filenames inside `media/`**, not hardlinks or symlinks. The three renderers (MD/HTML/JSON) already resolve media through a single `MediaEntry.relPath` indirection (see `src/media.ts` `buildMediaMap`), so deduplication is achieved by changing *what `relPath` points to* — the duplicate physical copies are simply never written, and every distinct ref that hashes to the same content resolves to one canonical file. This keeps the output folder **portable** (no symlink that `file://` browsers or a copy to another disk will break) and **memory-safe** (hash is streamed during extraction; unique-size files are never buffered).
 
-Media handling is the third differentiator battleground: reconciling `<attached: FILENAME>` / `<Media omitted>` references to actual files in sibling folders, with smart filename resolution (case-insensitive, ignoring `(1)`, dash/space variance) and correct MIME mapping (`.opus`, `.m4a`, `.pdf`). Most naive parsers get this wrong.
+End-user behavior, which the feature must guarantee:
+- **Disk savings** — WhatsApp re-exports and cross-chat forwards duplicate identical photos/videos; collapsing them to one copy typically reclaims a meaningful fraction of `media/` bytes in group chats.
+- **Deterministic output** — the same ZIP always yields the same file set with the same canonical names and hashes (enables trust, diffing, re-running).
+- **Idempotent re-runs** — re-running `wa-backup` on the same ZIP reproduces the identical `media/` without growing it; message de-dupe already exists (`mergeCsv`), dedup extends that property to media.
+- **`--inline` coexistence** — deduplication always applies to the on-disk `media/` copy; with `--inline` the single HTML embeds each occurrence independently, so the *file-level* disk saving is not realized inside the inlined HTML (it is one self-contained file regardless). This is acceptable and must be documented, not "fixed" by fuzzy logic.
+
+---
+
+## How Media Deduplication by Size + Hash Works (the mechanism)
+
+```
+For each reconciled media file (post-extraction):
+  stage 1: bucket by file SIZE
+     └─ size is unique  → write once, skip hashing (cannot be a duplicate)
+  stage 2: for each size bucket with >1 file:
+       hash each file (SHA-256, streamed during extraction)
+       bucket by HASH
+       └─ hash is unique → write once
+       └─ hash collides  → duplicate set:
+            pick ONE canonical file (deterministic rule)
+            write it once; map every other ref → canonical relPath
+            (optionally delete / never write the extra copies)
+```
+
+- **Why size-first:** hashing is the expensive step. Most media in a single chat have distinct sizes, so the size pre-filter eliminates the vast majority of hash computations for free. This is the universally recommended optimization (confirmed in `dedup.rs` `build_dedup_plan` and the FNV-64a optimization write-up).
+- **Why SHA-256:** cryptographic strength makes collisions astronomically improbable (birthday bound ≈ 2^128 distinct objects before 50% collision risk — far beyond any single-chat or even single-user scale). Production systems (GitLab, Borg, restic) treat SHA-256 as collision-free and do *not* byte-compare on match. BLAKE3 is a faster alternative with equal security if speed becomes a concern on very large media sets.
+- **Collision paranoia (optional):** Borg adds a *cheap* secondary check on hash-match — compare the stored **size** of the new chunk to the stored size of the existing chunk; a size mismatch on equal hash is treated as a collision and handled. This costs nothing extra because size is already known. Recommended as an optional safeguard, not a default necessity.
+- **Streaming, memory-safe hash:** compute the digest *while extracting* (pipe the inflate stream through `crypto.createHash`), so no file is re-read and nothing is buffered — this satisfies the project's hard "stream-parse / memory-safe" constraint and matches GitLab's "streaming hash during write" ADR.
+- **Content-addressed storage vs links:** store the canonical bytes under a name derived from content (e.g., `media/<sha256>.<ext>`, or keep the *primary* original name and have others point to it). Avoid hardlinks/symlinks as the primary mechanism because they break portability — a backup copied to another disk, zipped, or opened via `file://` loses links, defeating the core "open years later, anywhere" value.
+
+---
+
+## Expected End-User Behavior (acceptance framing)
+
+| Behavior | What the user sees | How the design delivers it |
+|----------|--------------------|----------------------------|
+| **Disk savings** | `media/` folder is smaller; "X duplicates removed, Y MB saved" on stderr | Two-stage dedup collapses identical files to one physical copy |
+| **Deterministic output** | Re-running on the same ZIP yields byte-identical `media/` (same names, same hashes) | Canonical selection is a fixed, deterministic rule (see Differentiators) |
+| **Idempotent re-runs** | Running the tool twice does not duplicate media or grow `media/` | Hashes are content-derived and stable; `mergeCsv` already makes messages idempotent |
+| **No broken references** | MD/HTML/JSON all still render every message's media correctly | `relPath` rewrite keeps the `MediaEntry` indirection intact |
+| **`--inline` still works** | Single HTML still opens with all media embedded | Inline reads the canonical file; embeds per occurrence (see caveat) |
+| **Portable backup preserved** | Folder copies/zips to another machine and still opens in a browser | No symlinks/hardlinks; canonical file is a normal file in `media/` |
+
+**`--inline` caveat (must be documented, not "fixed"):** when `--inline` is set, the HTML embeds each media occurrence as an independent base64 blob. Deduplication of the on-disk `media/` copy still happens, but the * HTML file itself does not shrink from dedup* because each message that references the duplicate still inlines its own copy. This is correct and expected — the user chose a single self-contained file. Do **not** attempt cross-occurrence base64 sharing inside one HTML as a v1.1 requirement (see Anti-Features).
+
+---
+
+## Existing v1.0 Features This Builds On (dependency context)
+
+The deduplication feature is an *add-on* to already-shipped media handling. It must integrate with, not replace, these:
+
+| Existing piece | File / symbol | Role in dedup |
+|----------------|---------------|---------------|
+| **Media reconciliation** | `src/media.ts` → `reconcileMedia` | Extracts zip entries into `media/`. Dedup hooks in here: compute hash during extraction, decide canonical, skip writing duplicates. |
+| **Media map** | `src/media.ts` → `buildMediaMap` returning `Map<string, MediaEntry>` with `relPath` | **The integration seam.** Change `relPath` so duplicate refs point to the canonical file. Renderers consume only `relPath`, so they need no change. |
+| **Inline eligibility** | `src/media.ts` → `INLINE_MAX_BYTES`, `isInlineable(mime, size)` | Unchanged. Inline reads from the canonical `relPath`. |
+| **Message source-of-truth** | `src/model.ts` → `mergeCsv` (idempotent) | Gives deterministic, stable message order → drives deterministic canonical selection (first-occurrence rule). |
+| **Media reporting** | `src/model.ts` → stderr `media: N resolved, M unresolved` | Dedup stats (duplicates, bytes saved) should print to stderr the same way, keeping artifacts clean. |
+| **Three renderers** | `render/{json,md,html}.ts` | Consume `MediaEntry.relPath`. No logic change needed beyond receiving deduped `relPath`. |
+
+**Critical implication:** because renderers already go through `MediaEntry.relPath`, deduplication is almost entirely a *media-layer* change. The riskiest part is deciding the canonical name deterministically and ensuring `reconcileMedia` does not write the duplicate physical files.
 
 ---
 
 ## Table Stakes
 
-Features users expect from any credible WhatsApp export tool. Missing any of these = product feels broken/incomplete.
+Features the deduplication feature **must** have to be credible. Missing any = the feature feels broken or unsafe.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| **Locale-tolerant date/time parsing** | Format varies by device/region/language; single-format parsers silently mis-date or drop messages | **HIGH** | Central hard problem. Infer day/month order; support 24h and 12h-AM/PM; handle `- / .` separators and optional `[ ]`. `whatsapp-chat-to-pdf` cites 14 timestamp formats. |
-| **Multi-line message continuation** | WhatsApp writes only the first line with a timestamp; the rest are naked continuation lines | **MED** | Line-by-line: a line lacking a timestamp header appends to the previous message. |
-| **Three outputs in one pass: Markdown + HTML + JSON** | Users want editing (MD), viewing (HTML), and structured reuse (JSON) | **MED** | `whatsapp-export-md` does MD+HTML+JSON; we match that and add WhatsApp-like HTML. Few tools do all three cleanly. |
-| **Media reconciliation (filename → file in sibling folder)** | txt references `IMG-…jpg` / `<Media omitted>`; files live in media folders. Without reconciliation, output is broken | **MED–HIGH** | Map `<attached: FILENAME>` and bare names to files; relative-path reference by default. Smart resolution recommended (see Differentiators). |
-| **WhatsApp-like HTML rendering (bubbles, per-sender color, timestamps)** | "Fully viewable backup" goal requires familiar visual fidelity | **MED** | `WhatsApp-Chat-Exporter` and `whatsapp-export-md` both render bubbles/day-grouping. We must match the look. |
-| **Preserve `<Media omitted>` & deleted messages as visible placeholders** | Users want the full record, including gaps (privacy/legal/continuity) | **LOW** | Render as a placeholder bubble/line. Localized strings (`Média absent`, `Medien ausgeschlossen`) — match structurally, not by English string. |
-| **System-event lines handled (rendered as plain lines in v1)** | Exports contain `X added Y`, renames, and the E2E notice (line 2) | **LOW** | v1: plain lines. Filter the E2E encryption notice (always 2nd line). |
-| **Streaming / line-by-line parse (memory-safe on large chats)** | Long histories + videos can be huge; loading all into memory fails | **MED–HIGH** | Project constraint. Core must stream; do not buffer entire transcript. |
-| **UTF-8 / encoding robustness** | Exports are UTF-8 but may arrive as UTF-16/Latin-1; emoji/multilingual text | **LOW–MED** | Detect BOM/encoding; preserve emoji and non-Latin scripts. |
-| **Output to chat-named folder; `--out` override** | Users expect a self-contained folder; sometimes want a custom path | **LOW** | Default = chat name; flag overrides. |
-| **Portable, no-server standalone output** | "Open years later without WhatsApp/phone/account" is the core value | **LOW** | HTML must open via `file://` with no backend. Media referenced relatively. |
+| Feature | Why Expected | Complexity | Notes / Dependency |
+|---------|--------------|------------|--------------------|
+| **Detect duplicates by size + SHA-256 hash; store each unique file once** | This *is* the feature. Without it there is no dedup. | **MED** | Stream hash during `extractEntry` (node:crypto). Group by size first, hash only collisions. |
+| **Two-stage size pre-filter** | Performance + memory-safety: most media have unique sizes; hashing them is wasted CPU and risks buffering. | **LOW** | Size already known from `fs.statSync` / central directory. Skip hashing unique-size files. |
+| **All three outputs reference the single canonical copy (no broken links)** | Users expect every message's media to still render after dedup. | **LOW–MED** | Achieved by rewriting `relPath` in `buildMediaMap`; renderers untouched. |
+| **Portable storage (no symlink/hardlink as primary mechanism)** | Core value: folder must open via `file://` and survive copy/zip to another disk. | **MED** | Canonical file is a normal file in `media/`; refs point to it by name. |
+| **Idempotent / deterministic re-runs** | Re-running must reproduce identical `media/`; trust + versioning depend on it. | **LOW–MED** | Content hashes are stable; canonical selection must be a fixed rule (see Differentiators). |
+| **Dedup stats reported to stderr** | Mirrors existing media reporting; keeps JSON/MD/HTML artifacts clean. | **LOW** | `duplicates found`, `bytes saved`. Hook into existing stderr report. |
+| **Memory-safe on large chats/videos** | Project constraint; dedup must not buffer whole files. | **MED** | Streaming hash during extraction; unique-size files never read into memory for hashing. |
+| **Does not modify the source ZIP** | Project non-negotiable: only reads the ZIP. | **LOW** | Dedup operates only on the output `media/` layer. |
 
 ---
 
 ## Differentiators
 
-Features that set the product apart. Not strictly required, but they are the competitive wedge and align with project intent.
+Features that set the implementation apart or add real value beyond the bare minimum. Not all are required for v1.1; rank by effort/value.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **Optional base64 inline → single self-contained HTML** | One file opens anywhere, no folder to keep in sync; ideal for archiving/sharing | **LOW–MED** | `whatsapp-export-md` has `--embed --embed-max-mb`. Cap per-file size (e.g. 8 MB) to avoid bloat. Strong differentiator for "open anywhere". |
-| **WhatsApp-like HTML fidelity (bubbles + per-sender color + day dividers)** | Familiar, faithful reconstruction is the emotional core of a "backup you can read" | **MED** | Per-sender color must be stable/deterministic across reloads. |
-| **Smart media filename resolution** | Exports get renamed (`file (1).jpg`, case/space/dash variance); naive matching drops media | **MED** | Case-insensitive; ignore `(1)`, spacing, `_`/`-` differences; correct MIME for `.opus`/`.m4a`/`.pdf`. Differentiates from naive parsers. |
-| **Clean, isolated parsing core reusable by future web version** | Web v2 imports the same core; protects build investment | **MED** (architectural) | Not a user-facing feature, but a product-line differentiator. Enforce separation now. |
-| **Per-day grouping in HTML & Markdown** | Mirrors WhatsApp's date separators; improves readability | **LOW** | `whatsapp-export-md` does it; expected by users who've seen WhatsApp UI. |
-| **Linkify URLs in messages** | Plain `http(s)://` become clickable | **LOW** | Common in converters; cheap win. |
-| **Privacy-local, no upload, no telemetry** | Many users choose tools specifically to avoid cloud handling of private chats | **LOW** | `whatsapp-export-md` and `WhatsApp-Chat-Exporter` both emphasize "runs locally". State it proudly. |
-
-### Differentiators viable in later versions (not v1, but worth roadmapping)
-
-| Feature | Why valuable later | Complexity |
-|---------|-------------------|------------|
-| **Search / filter (date range, sender, keyword)** | `WhatsApp-Chat-Exporter` filters by date/phone/include-exclude; high user demand for "find that one message" | MED |
-| **Contact / participant aggregation** | Who messaged most, first/last seen, volume — analytics tools do this; natural for a backup browser | MED |
-| **Batch processing of multiple zips** | Scale to "all my chats"; project explicitly defers to web v2 | MED–HIGH |
-| **Additional export formats (PDF, CSV, TXT, Excel)** | `whatsapp-chat-to-pdf`, ChatToPDF, WAExport show strong demand for PDF/CSV | MED |
-| **Output encryption (AES zip / passphrase)** | Rare in tools; strong privacy differentiator for sensitive archives | MED |
+| Feature | Value Proposition | Complexity | Recommendation |
+|---------|-------------------|------------|----------------|
+| **Deterministic canonical-name selection (first-occurrence rule)** | Picking the canonical file by "first message that referenced it" makes output byte-stable across runs/machines — a quality differentiator and a table-stakes enabler for determinism. | **LOW** | **Build it.** Sort duplicate group by first message index; use that ref's original name as the canonical filename. |
+| **Optional collision double-check (size on hash-match)** | Paranoid archival safety: on a SHA-256 match, also confirm the stored byte-size equals the new file's size (Borg's cheap safeguard). | **LOW** | **Build it** as a default-on, zero-cost check (size is already known). |
+| **Checksum/media manifest (`media/manifest.json`)** | Lists each canonical file's hash, size, and the original refs that map to it. Enables future verification, re-derivation, and cross-run dedup without re-scanning. | **MED** | Strong differentiator; recommended for v1.1 if effort allows. Portable (lives in output folder). |
+| **`--hardlink` opt-in for same-filesystem backups** | Power users who keep the backup in place (not copied) save space *and* keep original per-ref filenames. | **MED** | Optional flag; default OFF (preserve portability). Conflicts with "portable by default" → opt-in only. |
+| **Hash algorithm abstraction (SHA-256 default, BLAKE3 option)** | BLAKE3 is faster for very large media sets; SHA-256 is the safe default. | **LOW** | Optional; only if profiling shows hashing is a bottleneck. Default SHA-256. |
+| **Cross-chat / persistent hash index dedup** | Dedupe media shared across multiple exported chats (e.g., same photo forwarded into 5 groups). | **MED–HIGH** | **Defer to v2** (batch processing is already out-of-scope for v1; privacy/portability argue against an external index). |
+| **Perceptual/near-duplicate image detection** | Catch "same photo, slightly re-encoded" copies. | **HIGH** | **Out of scope** — needs ML/perceptual hashing; exact-hash is the v1.1 contract. |
 
 ---
 
 ## Anti-Features
 
-Features to deliberately NOT build (per project scope + lean v1). Building these would dilute the core value or explode scope.
+Deliberately **do not build** these for v1.1. Building them would explode scope, break portability, or contradict project principles.
 
 | Anti-Feature | Why Avoid | What To Do Instead |
-|--------------|-----------|-------------------|
-| **Cloud upload / web UI in v1** | Separate delivery channel; out of v1 scope (web is v2) | Build CLI now; keep core importable for web later |
-| **Parsing the Google-Drive encrypted backup / Crypt databases** | Different, far larger problem (DB schema + Crypt12/14/15 decryption); `WhatsApp-Chat-Exporter` owns this niche | Stay on the email/export ZIP only |
-| **Sticker / GIF mapping from media folders** | `_chat.txt` has no reference to stickers/GIFs; unrecoverable from txt | Defer; document as known gap |
-| **Contact-list / participant aggregation in v1** | Lean v1; analytics is a later differentiator | Ship core backup; add aggregation in v2 |
-| **Batch multiple zips in one run (v1)** | Simpler to be one-chat-per-run; web covers scale | One chat per CLI invocation |
-| **Output encryption in v1** | Out of core value scope; adds key-management burden | Defer to a later privacy differentiator |
-| **NLP / sentiment / emoji analytics in v1** | Goal is backup/viewing, not analysis; many tools already do analytics | Leave structured JSON for downstream analysis |
-| **Reconstructing reactions / reply-context / read receipts** | These are NOT in the export file at all — impossible from txt | Don't promise; document the limitation |
-| **Assuming a single locale** | The #1 real-world parsing bug; breaks on non-default regions | Always parse locale-tolerantly |
-| **Loading entire transcript into memory** | Fails on large chats (project constraint) | Always stream-parse |
+|--------------|-----------|--------------------|
+| **Chunk-level / content-defined (CDC) deduplication (Rabin/FastCDC)** | Media are discrete, byte-identical re-exports — not slightly-edited versions. CDC adds rolling-hash chunking complexity for ~0 gain here. | Whole-file SHA-256 dedup. (Confirmed: CDC's value is edit-resilience, irrelevant to WhatsApp re-exports.) |
+| **Symlink or hardlink as the *default* storage mechanism** | Breaks `file://` browser viewing, copy-to-another-disk, and zip portability — directly attacks the core value. | Content-addressed normal files in `media/`; optional `--hardlink` only (see Differentiators). |
+| **Mutating previously generated backups / in-place `media/` rewriting** | Non-idempotent, risky, violates "generate fresh each run." | Each run regenerates `media/` deterministically from the ZIP. |
+| **Network / remote hash-index dedup** | Contradicts the "runs locally, no upload" privacy principle (README FAQ). | Local-only dedup within one run's media set. |
+| **Storing a hash index/DB *outside* the output folder** | Breaks portability (backup must be self-contained). | If a manifest is added, keep it inside the output folder. |
+| **Fuzzy / perceptual matching to "recover" near-duplicates** | High complexity, false-positive risk, out of contract. | Exact-hash only; document the limitation. |
+| **Sharing one base64 blob across multiple occurrences inside an inlined HTML** | Complex DOM/fragment bookkeeping; marginal win since `--inline` is already one self-contained file. | Embed per occurrence; document that `--inline` does not gain dedup disk savings. |
+| **Assuming re-exports are never byte-identical / skipping dedup for "different names"** | `IMG-0001.jpg` and `IMG-0001 (1).jpg` ARE the same file (already normalized in `reconcileMedia`). | Dedup on content, not on name. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-Locale-tolerant date/time parsing  ──┐
-Multi-line continuation handling   ──┤
-UTF-8 / encoding robustness        ──┴──► Normalized message model
-                                            │
-                                            ├──► Markdown output
-                                            ├──► JSON output
-                                            └──► HTML output (needs per-sender color + day grouping)
-                                                     │
-Media reconciliation ───────────────────────────────┤ (HTML/MD reference media; JSON records refs)
-Smart media filename resolution ─────────────────────┘
-Optional base64 inline ──────────────────────────────► single self-contained HTML (depends on Media reconciliation)
-Streaming parse ─────────────────────────────────────► enables all outputs on large chats (cross-cutting)
+reconcileMedia (extract zip → media/)
+        │  [hook: stream SHA-256 during extraction; bucket by size then hash]
+        ▼
+   Dedup stage  ──► choose canonical file (first-occurrence, deterministic)
+        │                │
+        │                └──► write canonical ONCE; map duplicate refs → canonical relPath
+        ▼
+   buildMediaMap (MediaEntry.relPath)
+        │  [relPath now points to canonical file for all duplicate refs]
+        ├──► render JSON   (uses relPath)   ── no change
+        ├──► render MD     (uses relPath)   ── no change
+        └──► render HTML   (uses relPath; --inline embeds canonical file)
+                                        │
+   stderr media report  ──► + "N duplicates, Y bytes saved"
 ```
 
 **Key dependencies:**
-- Everything depends on the **normalized message model**, which depends on the three parsers (date, multi-line, encoding).
-- **WhatsApp-like HTML**, **Markdown**, and **JSON** all consume the same model — build the model once, render three ways.
-- **Base64 inline** depends on **media reconciliation** (you must have resolved the file before you can inline it).
-- **Per-sender color / day grouping** are HTML/MD presentation concerns layered on the model.
+- Dedup is **downstream of `reconcileMedia`** and **upstream of `buildMediaMap`** — the two media-layer functions are the only code that must change; renderers are unaffected because they consume `relPath`.
+- Deterministic canonical selection depends on **stable message order**, which `mergeCsv` already guarantees (idempotent source-of-truth).
+- `--inline` depends on the **same `MediaEntry`**; dedup changes only which file `relPath` resolves to, so inline continues to work unchanged.
+- Memory-safety depends on **streaming hash during extraction** (no separate re-read pass).
 
 ---
 
-## MVP Recommendation (v1)
+## Complexity & Effort Summary
 
-Prioritize (all table stakes, in dependency order):
-1. **Locale-tolerant date/time parsing** (foundation — nothing works without it)
-2. **Multi-line continuation + UTF-8 robustness** (completes the normalized model)
-3. **Streaming parse** (memory-safe on large chats)
-4. **JSON output** (cheapest render; validates the model)
-5. **Markdown output**
-6. **WhatsApp-like HTML** (bubbles, per-sender color, timestamps, day grouping)
-7. **Media reconciliation** (folder-referenced by default) + **preserve `<Media omitted>`/deleted as placeholders**
-8. **Optional base64 inline single HTML** (differentiator, low cost once media is resolved)
-
-Defer (differentiators for later versions): search/filter, participant aggregation, batch, PDF/CSV, output encryption, web UI.
+| Sub-task | Complexity | Rationale |
+|----------|------------|-----------|
+| Stream SHA-256 during `extractEntry` | MED | Add a `crypto` hash transform to the existing pipe; one-time, no re-read. |
+| Two-stage size pre-filter | LOW | Size already available; bucket before hashing. |
+| Canonical selection (first-occurrence) | LOW | Sort duplicate group by first message index; deterministic. |
+| `relPath` rewrite in `buildMediaMap` | LOW–MED | Map every duplicate ref's `MediaEntry.relPath` to canonical; core change. |
+| Skip writing duplicate physical files | LOW–MED | Decide canonical before/at write time; delete extras if written. |
+| `--inline` coexistence | LOW–MED | No code change needed; document behavior. |
+| Dedup stats to stderr | LOW | Extend existing report. |
+| Optional collision size-check | LOW | Compare sizes on hash-match (already known). |
+| `media/manifest.json` | MED | New file; portable; optional. |
+| `--hardlink` opt-in | MED | Platform fs call; default OFF. |
 
 ---
 
-## Sources
+## MVP Recommendation for v1.1
 
-- WhatsApp-Chat-Exporter (Python, DB + decryption, HTML/JSON/text, filtering, templates) — github.com/KnugiHK/WhatsApp-Chat-Exporter, wts.knugi.dev
-- whatsapp-chat-parser (npm, TypeScript, parse _chat.txt → objects, daysFirst inference, parseAttachments) — github.com/Pustur/whatsapp-chat-parser, npmjs.com/package/whatsapp-chat-parser (v4.0.2)
-- whatsapp-export-md (Python 2025, MD/HTML + media link/embed base64, smart filename resolution, JSON dump) — pypi.org/project/whatsapp-export-md
-- whatsapp-chat-to-pdf (Python 2026, 14 timestamp formats, PDF/XLSX/CSV) — pypi.org/project/whatsapp-chat-to-pdf
-- WhatsR (R, parsing/anonymizing/visualizing), whatsapp-chat-analyzer (Python, auto format detection) — CRAN / PyPI
-- Online converters: ChatToPDF (chattopdf.app), WAExport (waexport.wadesk.io), ThreadRecap — PDF/Excel/CSV from TXT/ZIP
-- Format structure reference: whatsquiz.com/blog/whatsapp-chat-export-file-format; StackOverflow WhatsApp chat-log regex thread
+Prioritize (in dependency order):
+1. **Two-stage size+SHA-256 dedup during `reconcileMedia`** (core mechanism, MED) — stream hash, bucket by size then hash.
+2. **Deterministic canonical selection (first-occurrence)** (LOW) — enables idempotency/determinism.
+3. **`relPath` rewrite in `buildMediaMap`** (LOW–MED) — the actual disk saving; renderers unchanged.
+4. **Dedup stats to stderr** (LOW) — mirrors existing media reporting.
+5. **Optional collision size-check** (LOW) — cheap paranoia, default on.
+6. *(If effort allows)* **`media/manifest.json`** (MED) — portable verification artifact.
 
-**Confidence note:** Format/structure facts are corroborated across ≥5 independent tools and a dedicated format guide → treat as reliable. Tool-specific feature lists come from web search (provider tier LOW) → indicative, verify against current docs when implementing. Docs source (whatsapp-chat-parser API) classified MEDIUM.
+Defer: `--hardlink` opt-in, hash-algorithm abstraction, cross-chat/persistent-index dedup, perceptual near-dup detection.
+
+---
+
+## Open Questions / Phase-Level Research Flags
+
+- **Exact hook point in `extractEntry`:** confirm `crypto.createHash('sha256')` can be piped as a Transform alongside the file write without disturbing the existing `zlib.createInflateRaw()` pipe (phase-level, MED confidence on integration).
+- **Canonical filename policy:** first-occurrence (recommended) vs shortest-name vs hash-named. First-occurrence is most intuitive and deterministic; verify it doesn't surprise users who expect original names. (LOW)
+- **Should dedup run before or after `--inline`?** Recommend dedup first (canonical file exists, inline reads it). Confirm no double-embedding logic needed. (LOW)
+- **Manifest format:** if `media/manifest.json` is built, define schema (hash, size, ext, refs[]). (MED, only if manifest is in scope)
+
+---
+
+## Sources (with confidence)
+
+- `dedup.rs` `build_dedup_plan` — reference Rust impl showing the exact two-pass size→hash strategy. (web/docs.rs, **HIGH** corroboration of the mechanism)
+- GitLab ADR-008 Content-Addressable Storage — SHA-256 identification, streaming hash during write, content-hash as storage path, collision treated as free. (web/gitlab.com, **HIGH**)
+- Borg backup issue #170 (hash collision handling) — SHA-256 collision bound 2^128; Borg adds a cheap length-check on match. (web/github.com, **HIGH**)
+- Unseel "Data Deduplication" overview — chunk/hash/lookup/branch model, SHA-256/BLAKE3, dedup ratios, index-RAM costs, collision note. (web/unseel.com, **HIGH**)
+- "Efficient File Deduplication in Go Using SHA-256" (Medium, 2025) — two-phase size pre-filter + non-crypto hash optimization, fdupes comparison. (web/medium.com, **MEDIUM** — optimization write-up, corroborates size pre-filter)
+- zbackup / restic / Borg design docs — whole-file vs chunk-level, rolling-hash CDC, immutable repos. (web, **HIGH** for "CDC is for edit-resilience, not discrete files")
+- `wa-backup` source (`src/media.ts`, `src/model.ts`, `README.md`, `.planning/PROJECT.md`) — existing media reconciliation, inline, media map, and reporting behavior this feature integrates with. (local, **HIGH**)
+
+**Confidence note:** The *deduplication mechanism* (size+hash, two-stage, content-addressed, SHA-256 collision-safety, streaming) is well-established and corroborated by ≥4 independent production systems → HIGH. Exact *integration specifics* into `wa-backup`'s `reconcileMedia`/`buildMediaMap` are flagged above as phase-level research (MED).

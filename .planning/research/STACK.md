@@ -1,174 +1,274 @@
-# Technology Stack
+# STACK — Media Deduplication (v1.1 "Media Hygiene")
 
-**Project:** WhatsApp Chat Backup (wa-backup)
-**Researched:** 2026-08-21
-**Mode:** Greenfield — TypeScript/Node CLI, parsing core reusable in a future web frontend
-**Overall confidence:** HIGH for structural choices; MEDIUM for date/locale parsing (hardest problem, needs phase-level research)
+**Project:** wa-backup (`wa-backup@0.1.1`, TypeScript/Node ESM CLI)
+**Feature:** v1.1 — verify media by size + cryptographic hash; store each unique
+file once (content-addressed) and point all identical references at the single
+copy to save disk.
+**Researched:** 2026-08-24
+**Overall confidence:** HIGH
 
 ---
 
 ## Executive Recommendation
 
-Build a **TypeScript ESM Node CLI**. Use **Commander** for argument parsing, **fflate** for streaming
-ZIP extraction (chosen over yauzl specifically because it runs unchanged in the browser — directly
-serving the "reusable parsing core" requirement), **`node:readline`** (built-in) for memory-safe
-line streaming, **eta** for WhatsApp-like static HTML, a **hand-rolled Markdown writer** (no
-dependency), and **date-fns + a custom multi-locale timestamp registry** for the central hard problem
-(locale-dependent `_chat.txt` dates). Tooling: **tsx** to run, **tsup** to build the distributable bin.
+Implement deduplication with **zero new runtime dependencies** for the core path:
+use Node's built-in `node:crypto` SHA-256 as a **streaming** Transform wired into
+the existing `extractEntry()` pipe. Store each unique file **once** under a
+content-addressed name (`media/<sha256[:16]><ext>`) and emit a small
+`media/manifest.json` that maps every referenced media name to its canonical
+`relPath`. Update `buildMediaMap()` to read that manifest (falling back to the
+current filename scan for pre-v1.1 backups). This is the layout used by OCFL,
+GitLab Artifact Registry, and Kopia — it is portable, needs no hardlinks, and
+extends cleanly to cross-backup global CAS later.
 
-The single most important architectural rule: **isolate every I/O boundary behind a small interface**
-(`ChatArchiveReader` for the zip, an async line iterator for the transcript). The parser core must
-depend only on plain strings/streams so the web version imports it directly.
+A **fast non-cryptographic pre-filter (xxhash-wasm @ 1.1.0)** is the only
+*optional* dependency, used as a two-stage gate so we skip the SHA-256 pass for
+obviously-different large videos. It is WASM (no native binary), so it preserves
+the "core reusable in the browser" property the project already bought with
+fflate. `@node-rs/xxhash` (native) and `xxhashjs` (pure-JS, 10–350× slower) are
+rejected.
 
----
-
-## Recommended Stack
-
-### Core Framework / Runtime
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| TypeScript | 5.x (latest) | Language | Type safety for the message model; required for web reuse | HIGH |
-| Node.js (ESM) | ≥ 22.12 (dev: 26.5) | Runtime | Commander 15 requires ≥ 22.12; ESM for clean tree-shaking | HIGH |
-| `package.json` `type: module` | — | Module system | ESM so the same core loads in Node and browser bundlers | HIGH |
-
-### CLI
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| commander | 15.0.0 | Arg parsing | Zero-dependency, TypeScript-native, ~25KB, fastest startup (~25ms). Chainable API fits a transform CLI with a handful of options (`<zip>`, `--out`, `--inline-media`). ~500M weekly downloads = battle-tested. | HIGH |
-
-### Archive (ZIP) extraction
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| fflate | 0.8.3 | Streaming unzip | **Tiny (8KB), actively maintained (2026), ESM, runs in Node AND browser** — the only option that satisfies "core reusable in web" without a second code path. Its streaming `Unzip` API emits per-entry streams we pipe straight to disk → memory-safe even with large videos. | HIGH (with a usage caveat — see below) |
-
-### Streaming line parsing
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| `node:readline` (built-in) | Node core | Line-by-line read | Built into Node, emits one line at a time over a `Readable` → constant memory regardless of chat size. No dependency, no version drift. The parser accumulates continuation lines that don't match the timestamp regex. | HIGH |
-
-### HTML templating
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| eta | 4.6.0 | Static HTML render | Embedded-JS syntax, ~3KB, TypeScript-native, runs in Node AND browser (reuse win). Precompiles templates → fast repeat renders. `<%= %>` escapes by default (XSS-safe for untrusted chat content). Partials cover the message-bubble + page-layout split. | HIGH |
-| @kitajs/html | 4.2.13 | (alternative) JSX→string | Even faster, type-safe JSX components that compile to escaped HTML strings. Choose this instead of eta if you want component ergonomics for bubbles; adds tsx/JSX build config. | MEDIUM-HIGH |
-
-### Markdown generation
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| Custom `MarkdownWriter` (no dep) | — | Emit `.md` | A chat log is a linear sequence (`**Sender** _time_\n\nbody`). Hand-rolled writer with one escape helper is simpler, dependency-free, and gives full control over output. Avoid heavy AST libs for v1. | HIGH |
-
-### Date / locale parsing (the hard problem)
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| date-fns | 4.4.0 | Date construction + output formatting | Tree-shakeable, TS-native, current. Use `parse` (with `date-fns/locale` for localized month/AM-PM tokens) once a format is resolved. Also use it (and `Intl.DateTimeFormat`) for *rendering* timestamps in output. | MEDIUM |
-| Custom `formats.ts` registry | — | Locale detection | **No library auto-detects WhatsApp's locale format.** Proven parsers (whatsapp-chat-to-pdf, NeverFar whatsapp-export-parser, whatsapp-wrapped) all ship a regex pattern set tested against the first lines, then parse with a known tokenizer. This is the real work and must be built, not imported. | MEDIUM |
-
-### Build / dev tooling
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| tsx | 4.23.12 | Run TS directly | Zero-config `node` replacement for `dev`/`start`; no emit step needed during development. | HIGH |
-| tsup | 8.5.1 | Build distributable bin | esbuild-based: bundles to ESM, injects shebang, emits `.d.ts` and a `bin` entry for `npm i -g`. Far simpler than `tsc`+packaging or webpack. | HIGH |
-| @types/node | 26.2.0 | Types | Matches the Node 26 dev runtime; pin to your engine major. | HIGH |
-| picocolors | 1.1.1 | Terminal styling | 1KB, dependency-free color for CLI feedback. Optional but standard. | HIGH |
+Hardlinks are **not** part of the dedup mechanism. Content-addressing already
+stores each blob once, so disk is saved without filesystem links. Hardlinks are
+only worth considering as an optional convenience layer that also keeps the
+original WhatsApp filename on disk; on Windows (FAT/ReFS) and cross-volume they
+fail, so they must always fall back to copy.
 
 ---
 
-## Alternatives Considered (and why rejected)
+## Recommended Stack Additions
 
-| Concern | Recommended | Alternative | Why Not |
-|---------|-------------|-------------|---------|
-| CLI | commander 15 | yargs 18 | yargs pulls ~7 deps and adds ~20ms startup; its strength (built-in validation, middleware, typo suggestions) is unnecessary for a fixed-option transform CLI. Commander is zero-dep and native-TS. |
-| CLI | commander 15 | @oclif/core 4 | oclif is a full framework (~30 deps, class-per-command scaffolding, ~100ms cold start). Overkill for a single-binary tool; wrong for a lean personal CLI. |
-| CLI | commander 15 | @clack/prompts 1.7 | clack is **prompts only**, not an argument parser. Useful later for an interactive wizard, but cannot replace Commander for flag/arg handling. |
-| ZIP | fflate 0.8 | yauzl 3.4 | yauzl is correct/spec-compliant and Node-only (fd random access). But it is effectively unmaintained (last real release ~2017) and **browser-incompatible**, breaking the reuse requirement. Keep as a fallback if fd-based random access is ever needed. |
-| ZIP | fflate 0.8 | jszip 3.10 | jszip loads the whole archive into memory to read it — fatal for large WhatsApp zips with videos. Reject for memory-safety. |
-| ZIP | fflate 0.8 | unzipper 0.12 | unzipper streams but is Node-only; offers no browser-reuse advantage over fflate and is heavier. |
-| Line parse | node:readline | byline 5.0 | byline is an unmaintained micro-wrapper around newline splitting; readline is core-maintained, async-iterator friendly, and does the same with no dep. |
-| Line parse | node:readline | line-reader | line-reader buffers lines into an array (not truly streaming) → defeats the memory-safety requirement. |
-| HTML | eta 4.6 | handlebars 4.7 | Logic-less templates add friction for nested bubble conditionals; ~180KB and Node-biased. eta is 3KB and browser-capable. |
-| HTML | eta 4.6 | lit 3.3 | lit is a client-side component runtime needing a DOM — wrong for generating a standalone static `.html` file that opens with no server. |
-| HTML | eta 4.6 | mustache 4.2 | Too limited (no real control flow/partials ergonomics) for a bubble layout. |
-| Markdown | custom writer | remark-stringify / mdast-util-to-markdown | AST→MD is correct but pulls the whole unified ecosystem for a linear log we can emit with template strings + one escaper. Reserve for a future if structured AST editing is needed. |
-| Dates | date-fns + registry | luxon 3.7 | Luxon is heavier (~70KB), in maintenance-only mode, and does **not** solve format detection either. date-fns is smaller and tree-shakeable. |
-| Dates | date-fns + registry | chrono-node 2.10 | NLP natural-language date parser ("next Monday"). Wrong domain — WhatsApp stamps are strict structured patterns, not prose. |
-| Dates | date-fns + registry | dayjs 1.11 | Parsing needs the `customParseFormat` plugin; locale coverage is weaker and plugin fragmentation hurts a reusable core. |
+| Concern | Add? | Technology | Version | Purpose | Why | Confidence |
+|---------|------|------------|---------|---------|-----|------------|
+| Authoritative hash | **No dep** | `node:crypto` `createHash('sha256')` | built-in (Node ≥22.12) | Streaming content hash per extracted media file | Collision-resistant, zero-dep, HW-accelerated (SHA-NI), satisfies "cryptographic hash" requirement | HIGH |
+| Fast pre-filter | **Optional dep** | `xxhash-wasm` | 1.1.0 | Cheap first-stage fingerprint to skip SHA-256 on mismatches | ~10–50× faster than SHA-256, WASM (no native binary), runs in browser too → keeps core web-reusable | HIGH (version) / MEDIUM (bundle) |
+| Manifest store | **No dep** | JSON written to `media/manifest.json` | — | Map `ref → {relPath, hash, size}` | Portable content-addressing; no DB, no links | HIGH |
+| Disk saving | **No dep** | content-addressed filenames + `fs.rename` | built-in | Store once, reference many | Inherent dedup; no hardlink portability issues | HIGH |
+| CLI flag | **No dep** | `--no-dedupe` opt-out | — | Allow disabling for debugging/forensics | Parity with `--no-fetch-titles` pattern already in code | HIGH |
+
+**Net new runtime deps: 0 (core). 1 optional (`xxhash-wasm`) if two-stage is wanted.**
 
 ---
 
-## Per-Concern Detail & Confidence
+## 1. Hashing — SHA-256 via `node:crypto` (streaming, memory-safe)
 
-### ZIP — critical usage caveat (memory safety)
-fflate has TWO unzip paths. **Use the streaming `Unzip` API**, not the buffer-based `unzip`/`unzipSync`
-(the buffer API reads the entire archive into RAM — exactly what we must avoid with video-heavy
-exports). Feed `createReadStream(zipPath)` into `new Unzip(...)`, match entries by name, and `pipe()`
-each media entry's `ondata` chunks to a `createWriteStream` in the output folder. `_chat.txt` is
-collected from its entry stream and handed to the line iterator. Wrap fflate behind a
-`ChatArchiveReader` interface so the web build swaps in `DecompressionStream`/`fflate` in-browser later.
+`crypto.Hash` is a `Transform` (both readable & writable). The existing
+`extractEntry()` already pipes `ReadStream → (inflate) → WriteStream`. We insert
+the hash Transform **in that same pipe** so bytes are hashed exactly once while
+they are written — constant memory regardless of video size (directly satisfies
+the v1 "stream-parse / memory-safe" constraint).
 
-### Dates — phase-level research flag
-This is the one area rated MEDIUM confidence because the difficulty is **detection**, not parsing.
-Recommended approach (validated by existing open-source parsers):
-1. A `formats.ts` registry of `{ id, regex, dateTokens, locale? }` patterns covering iOS bracketed,
-   Android dashed/dotted, year-first (ISO/Asian), 12h vs 24h, 2- vs 4-digit years, dot-time separators,
-   and localized AM/PM markers (`AM`/`p.m.`/Arabic `ص`/CJK `午前`).
-2. On load, test patterns against the first ~20 lines; pick the best match (highest hit rate).
-3. Extract `{datePart, timePart, sender, body}` via the matched regex; construct a `Date` with
-   date-fns `parse` (or a normalized `Intl`-free tokenizer for exotic digits).
-4. Ambiguous all-numeric dates (every component ≤ 12) → fall back to a `dayFirst` heuristic; expose
-   a `--day-first`/`--month-first` override flag.
-This deserves a dedicated research/design phase before coding (flag for the parser phase).
+Use `stream/promises.pipeline` (NOT bare `.pipe()`): `pipeline` destroys all
+streams and rejects on the first error, so a truncated read can never yield a
+silent wrong digest. (Confirmed best-practice in Node crypto docs and AppSignal
+streaming guidance.)
 
-### Reuse boundary (drives the whole stack)
-Every pick above was filtered through "does it also run in a browser?" fflate, eta, date-fns, and
-node:readline's *pattern* (replaced by an async line iterator over a `File` stream in web) all pass.
-Keep `fs`/zip/terminal I/O in thin adapter modules; the `parseChat(lines)` core stays pure.
+```ts
+import { createHash } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
 
----
-
-## Installation
-
-```bash
-# Runtime dependencies (production)
-npm install commander@15 fflate@0.8 eta@4.6 date-fns@4 picocolors@1
-
-# Dev / build tooling
-npm install -D typescript tsx@4 tsup@8 @types/node@26
+// source = inflate output (method 8) or raw rs (method 0) — same as today
+const hash = createHash('sha256');
+const tmp = path.join(mediaDir, `.${base}.tmp`);
+await pipeline(source, hash, createWriteStream(tmp));
+const digest = hash.digest('hex');          // 64-char lowercase hex
+const size = (await fs.stat(tmp)).size;
 ```
 
-`package.json` essentials:
-```json
-{
-  "type": "module",
-  "bin": { "wa-backup": "./dist/cli.js" },
-  "engines": { "node": ">=22.12" },
-  "scripts": {
-    "dev": "tsx src/cli.ts",
-    "build": "tsup src/cli.ts --format esm --target node22 --dts --clean",
-    "start": "tsx src/cli.ts"
+**Size + hash verification (two-stage, optional):**
+1. `size` is available for free after the write (`fs.stat`). If two refs have
+   different sizes they are definitively different — no hash needed.
+2. If sizes match, compare `sha256`. (SHA-256 collision probability is
+   astronomically low, so size+sha256 is treated as definitive equality.)
+3. *Optional fast gate:* compute `xxhash` first; only run SHA-256 when the
+   xxhash already matches a seen one. Saves CPU on archives with many large
+   *distinct* videos. SHA-256 over every byte is still fine and HW-accelerated,
+   so the xxhash stage is an optimization, not a requirement.
+
+**Why SHA-256, not MD5/SHA-1:** both have practical collision attacks; they are
+unacceptable for any integrity/fixity use. SHA-256 (or SHA-512) is the
+normative choice for content-addressing (OCFL requires sha256/sha512). SHA-512
+is marginally faster on 64-bit but SHA-256 is sufficient and standard.
+
+---
+
+## 2. Optional fast pre-filter — `xxhash-wasm@1.1.0`
+
+**Version verified current** via `npm view` (latest = `1.1.0`, 2026-08-24).
+Engines: Node ≥ 15 (fine with our `>=22.12`). Bundle: ~11.4 kB / 2.3 kB gzipped.
+
+| Option | Verdict | Reason |
+|--------|---------|--------|
+| `xxhash-wasm` 1.1.0 | **RECOMMENDED (optional)** | WASM, no native build, runs in Node *and* browser (keeps web-reuse promise), ~5.7M ops/s on 1-byte, ~34 ops/s on 100 MB — 10–50× faster than SHA-256. Streaming API (`create64().update().digest()`) mirrors `crypto`. |
+| `@node-rs/xxhash` 1.7.7 | Reject for v1.1 | Fastest (native `.node`), but ships platform-specific prebuilt binaries. Breaks the zero-native-dependency / browser-reusable philosophy the stack already committed to with fflate. Reserve for a future Node-only batch daemon. |
+| `xxhashjs` 0.2.2 | Reject | Pure-JS, uses `cuint` for u64; 10–350× slower than wasm (36 ops/s on 1 MB). Pointless overhead. |
+| `xxhash-addons` | Reject | `npm view` lookup failed (not reliably published / deprecated). No reason to chase it. |
+
+**Integration note (MEDIUM confidence):** `xxhash-wasm` instantiates a WASM
+instance once (~2 ms in Node). Confirm during implementation that esbuild/tsup
+bundles it without an external `.wasm` fetch — the package advertises
+self-contained bundles, so it should inline as base64. If tsup emits a separate
+`.wasm`, set `tsup` `loader`/`noExternal` or keep it external. Flag for the
+execution phase, not a blocker.
+
+---
+
+## 3. Content-Addressed Storage (CAS) Layout
+
+### On-disk shape (replaces today's `media/<originalName>`)
+
+```
+output/<chat>/
+├── messages.csv
+├── messages.{json,md,html}
+└── media/
+    ├── manifest.json            # NEW — ref → canonical mapping
+    ├── <sha256[:16]>.jpg        # canonical, stored ONCE
+    ├── <sha256[:16]>.mp4
+    └── ...
+```
+
+- Canonical filename = first 16 hex chars of the SHA-256 + original extension
+  (preserves type for browsers/`mimeFromExt`). 16 chars ≈ 2^64 space → no
+  realistic collision within a single chat's media set; bump to full 64 if ever
+  doing a *global* cross-backup store.
+- `manifest.json`:
+  ```json
+  {
+    "algorithm": "sha256",
+    "entries": {
+      "<normalizedRef>": { "relPath": "media/<hash16>.<ext>", "hash": "<sha256hex>", "size": 12345 }
+    }
   }
-}
-```
-tsup config injects the shebang (`#! /usr/bin/env node`) via `--banner` or a `tsup.config.ts`.
+  ```
+
+### Why CAS over "keep original name + hardlink duplicates"
+
+OCFL, GitLab, and Kopia all converge on the same pattern: **content hash is the
+storage key; a manifest maps references → content; "if destination exists, skip
+the write."** Benefits here:
+
+- **Disk saved with zero filesystem links** — the whole point of the feature,
+  achieved portably.
+- `buildMediaMap()` consumes `relPath` directly; renderers (`md`/`html`/`json`
+  + `--inline`) already take `relPath`, so the only change is *where relPath
+  comes from*.
+- Trivially extensible to **cross-backup global CAS** later: a shared
+  `~/.wa-backup/store/<hash>` with per-backup manifests — without redesign.
+- OCFL explicitly warns hard/symlinks "work at odds with" portable
+  content-addressing and should be avoided. Same conclusion.
+
+### Code-change map (integration with current `src/media.ts`)
+
+| Current | Change for v1.1 |
+|---------|-----------------|
+| `extractEntry(zipPath, meta, outPath)` | New `extractEntryDedup(zipPath, meta, mediaDir, seen)` → writes to `.<base>.tmp`, hashes via `pipeline(source, hash, ws)`, then `fs.stat` for size; canonical = `<digest16>.<ext>`; if `media/<canonical>` exists → `fs.unlink(tmp)` (dup, no disk write); else `fs.rename(tmp, canonical)`. Returns `{ digest, size, relPath }`. |
+| `reconcileMedia()` loop `extractEntry(...path.join(mediaDir, base))` | Call `extractEntryDedup`; accumulate `seen: Map<hash, {relPath,size}>` and `refMap: Map<normalizedRef, {relPath,hash,size}>`. After `Promise.all`, write `media/manifest.json`. |
+| `buildMediaMap(dir, messages)` | **Read `manifest.json` first**; for each message `m.media` look up `entries[normalizeMediaName(m.media)]` → `MediaEntry {relPath, mime, size, inlineable}`. **Fallback:** if no manifest (pre-v1.1 backup), keep current disk-scan. Preserves "re-render old backup without ZIP" feature. |
+| `model.runParser()` | After `reconcileMedia`, print dedup stats (`N files → M unique, saved X MB`) when `--verbose`. Add `--no-dedupe` to skip (writes original names, no manifest). |
+
+### Two-phase extract is atomic & safe
+Write to a hidden temp, compute hash, then `rename` to the hash path. A crash
+mid-extract leaves only a `.tmp` that a later run ignores/overwrites. Idempotent:
+re-running on the same dir never creates a second copy of identical content.
 
 ---
 
-## Sources (with confidence)
+## 4. Hardlink vs Copy — Trade-off Analysis
 
-- Commander vs Yargs vs Oclif 2026 comparisons (PkgPulse, Grizzly Peak Software, Nazar Boyko) — web, HIGH corroboration, versions verified via `npm view`.
-- yauzl / fflate / jszip npm READMEs + fflate discussion #190 — web, HIGH (fflate streaming caveat confirmed by maintainer).
-- WhatsApp `_chat.txt` format references (wachattopdf.com blog, NeverFar whatsapp-export-parser, whatsapp-wrapped SUPPORTED_FORMATS, whatsapp-chat-export-viewer) — web, HIGH; confirm locale detection is the real problem and is solved by pattern registries, not a library.
-- eta vs handlebars vs ejs 2026 (PkgPulse) + @kitajs/html benchmarks — web, HIGH.
-- mdast-util-to-markdown / remark-stringify READMEs — web, HIGH (confirms AST→MD is heavier than needed for v1).
-- `npm view <pkg> version` for every package listed — authoritative current versions, 2026-08-21.
+This matters **only if** we also want the original WhatsApp filename on disk
+(e.g. for human browsing / other tools). With pure CAS it is unnecessary. If we
+ever add a `--keep-original-names` convenience layer, use this rule:
 
-### Confidence summary
-| Area | Level | Note |
-|------|-------|------|
-| CLI (commander) | HIGH | Unanimous, version-verified |
-| ZIP (fflate) | HIGH | Maintained + browser-reusable; only caveat is using the streaming API |
-| Line parsing (readline) | HIGH | Built-in, standard pattern |
-| HTML (eta) | HIGH | Light, safe, reusable |
-| Markdown (custom) | HIGH | Simplest correct approach |
-| Dates (date-fns + registry) | MEDIUM | Detection logic is custom; needs a dedicated parser-phase deep-dive |
-| Tooling (tsx/tsup) | HIGH | Standard 2025 TS-CLI toolchain |
+**Try `fs.link(canonical, originalName)`; on failure fall back to
+`fs.copyFile(canonical, originalName)`.** Match the exact fallback set
+`EXDEV | EPERM | EACCES | ENOTSUP` (the pattern Microsoft's TypeScript repo uses
+for git hooks).
 
+| OS / FS | Hardlink? | Notes |
+|---------|-----------|-------|
+| macOS (APFS) | ✅ Yes | Fully supported; same volume only (always true here — both paths in `media/`). |
+| Linux (ext4/btrfs/xfs) | ✅ Yes | Fully supported. |
+| Windows (NTFS) | ✅ Yes (usually) | `CreateHardLinkW` works for files the user owns on the **same volume**, no admin. But fails with `EPERM` if privilege missing, `EXDEV` cross-volume. |
+| Windows (FAT/FAT32) | ❌ No | No hardlink support at all → must copy. |
+| Windows (ReFS) | ⚠️ Mostly no | ReFS < v3.5 lacks hardlinks (`ENOTSUP`); later versions added them. Assume "no" for safety. |
+| Any cross-volume | ❌ No | `EXDEV` — hardlinks cannot span volumes/filesystems. Both names live in one `media/` dir, so this only bites if the *canonical* and *alias* were ever on different mounts (they aren't). |
+
+**Recommendation:** Do **not** rely on hardlinks for the dedup guarantee. CAS
+already stores once. If original names are desired, hardlink-with-copy-fallback
+is fine as an *optional* polish, never on the critical path. Symlinks are worse
+(need admin/Developer Mode on Windows, can dangle) — avoid entirely.
+
+---
+
+## 5. Integration with the Existing Pipeline
+
+| Layer | Impact | Detail |
+|-------|--------|--------|
+| **fflate** | None | We still use the custom central-directory random-access extractor (`readCentralDirectory` + `extractEntry`), *not* fflate streaming (fflate's streaming inflate mis-handles data-descriptor members — already a documented v1 deviation). Hashing plugs into `extractEntry`'s output pipe. |
+| **tsup / esbuild build** | None for core; verify for `xxhash-wasm` | `node:crypto` is a built-in → left external automatically. If `xxhash-wasm` is added, confirm the WASM inlines (see §2 note). `bin: dist/index.js` ESM output unchanged. |
+| **commander (CLI)** | Tiny | Add `--no-dedupe` flag mirroring `--no-fetch-titles`. No new command. |
+| **date-fns / picocolors** | None | Unrelated. |
+| **Renderers (md/html/json, `--inline`)** | Indirect | They already consume `MediaEntry.relPath`. With CAS, `relPath` points at the canonical hash file; `--inline` then base64-encodes each canonical blob **once** and reuses it for all identical refs — dedup extends to the inlined HTML too. |
+
+No new CI matrix entry needed; existing Node 22/24 jobs cover `node:crypto`.
+
+---
+
+## 6. What NOT to Add
+
+- ❌ **`@node-rs/xxhash` / any native binding** — contradicts the browser-reuse +
+  zero-native-dep stance; adds per-platform prebuilt binaries to a personal CLI.
+- ❌ **`xxhashjs`** — pure-JS, 10–350× slower; no benefit over `crypto`.
+- ❌ **`multihashing` / `hasha` / generic hash wrappers** — unnecessary
+  abstraction over a 3-line `crypto` call; adds deps for nothing.
+- ❌ **A database (sqlite/leveldb)** — manifest JSON is enough; backups are
+  small and read-once.
+- ❌ **Hardlinks as the dedup mechanism** — CAS already dedupes; links add
+  portability risk (FAT/ReFS/Windows) for zero correctness gain.
+- ❌ **`blake3` / `xxhash` as the *authoritative* hash** — non-cryptographic; a
+  maliciously crafted collision could merge two different files. SHA-256 is the
+  trust anchor; non-crypto hashes are pre-filters only.
+- ❌ **In-memory buffering of media to hash** — defeats the memory-safety
+  constraint. Always hash in the extract pipe.
+
+---
+
+## 7. Versions Verified (quality gate)
+
+| Package | Declared/Recommended | Status | Source | Confidence |
+|---------|----------------------|--------|--------|------------|
+| `node` | `>=22.12` (dev 26.5.0) | OK — `crypto.createHash` streaming stable since 0.x | Node docs (v26.7) | HIGH |
+| `xxhash-wasm` | **1.1.0** | latest on npm, 2026-08-24 | `npm view xxhash-wasm version` | HIGH |
+| `@node-rs/xxhash` | 1.7.7 | latest but rejected (native) | `npm view` | HIGH |
+| `xxhashjs` | 0.2.2 | latest but rejected (slow) | `npm view` | HIGH |
+| `commander` / `fflate` / `tsup` / `picocolors` / `date-fns` | unchanged from v1.0 | still current | project `package.json` | HIGH |
+
+No version bumps required for the existing stack.
+
+---
+
+## 8. Phase-Level Research Flags (for roadmap)
+
+- **CAS manifest + `buildMediaMap` rewrite** is the only non-trivial code change;
+  needs a phase with fixture coverage for the pre-v1.1 fallback path.
+- **`xxhash-wasm` + tsup bundling** — verify WASM inlining during the build phase
+  (MEDIUM confidence); if it misbehaves, ship v1.1 with SHA-256 only (still
+  fully functional) and add xxhash later.
+- **Cross-backup global store** (`~/.wa-backup/store`) is a *future* milestone,
+  not v1.1; the manifest design already supports it.
+
+---
+
+## 9. Sources
+
+- Node.js `crypto` docs — `Hash` as stream, `pipeline` error semantics (nodejs.org/api/crypto, v26.7). HIGH.
+- AppSignal "Use Streams…" — `pipeline` vs `.pipe()`, memory-safe 4 GB hashing. HIGH.
+- `xxhash-wasm` GitHub/npm (jungomi) — benchmarks vs xxhashjs & Node crypto, WASM, browser+Node, v1.1.0. HIGH.
+- `@node-rs/xxhash` npm — native napi-rs benchmarks (fastest, but native). HIGH.
+- Microsoft Learn "Hard Links and Junctions" — NTFS hardlink rules, same-volume only, no admin for owned files. HIGH.
+- nodejs/node#11663 + microsoft/TypeScript#61858 — `ENOTSUP`/`EXDEV`/`EPERM` hardlink failures → copy fallback pattern. HIGH.
+- OCFL spec (ocfl.io) — content-addressing, manifest maps logical→content, "avoid hard/symlinks for dedup." HIGH.
+- GitLab ADR-008 (CAS) & Kopia architecture — SHA-256 block ID, temp-then-move, skip-if-exists dedup. HIGH.
+- `npm view` for xxhash-wasm / xxhashjs / @node-rs/xxhash versions. HIGH (authoritative).

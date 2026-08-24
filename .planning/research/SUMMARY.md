@@ -1,171 +1,164 @@
 # Project Research Summary
 
-**Project:** WhatsApp Chat Backup (wa-backup)
-**Domain:** CLI tool that converts a WhatsApp "Export chat" ZIP (`_chat.txt` + media folders) into Markdown + HTML + JSON, with media reconciliation. Parsing core must be importable by a future web frontend.
-**Researched:** 2026-08-21
-**Confidence:** HIGH for stack/architecture/feature-structure; MEDIUM for locale date detection (hardest problem, needs a research phase of its own)
+**Feature:** v1.1 "Media Hygiene" — deduplicate reconciled media in `wa-backup`
+(TypeScript/Node ESM CLI that parses WhatsApp export ZIPs into Markdown/HTML/JSON
+backups). **Researched:** 2026-08-24. **Overall confidence:** HIGH across all four
+research dimensions (stack, features, architecture, pitfalls) — every claim is
+traced to actual source (`src/media.ts`, `src/model.ts`, `src/render/*`,
+`src/csv.ts`, `src/parse/*`) and corroborated by ≥4 independent production backup
+systems (GitLab CAS, Borg, restic, Kopia, OCFL) plus Node.js / Microsoft Learn
+docs.
 
-## Executive Summary
-
-`wa-backup` is a **TypeScript/Node CLI** that turns a WhatsApp email/export ZIP into portable, no-server Markdown + WhatsApp-like HTML + structured JSON. The ecosystem is mature but fragmented — most tools parse the *database* or *upload to the cloud*; none popular tool cleanly does all three outputs locally in one pass. That combination, plus a future-web-reusable parser core, is the deliberate wedge. The project scope is intentionally lean: it targets only the **plain-text export ZIP**, not the encrypted Google-Drive/Crypt databases (a far larger, separate problem).
-
-The recommended architecture is **Ports-and-Adapters (Hexagonal)** with a pure, platform-agnostic `core/` at the center and thin Node adapters (`fflate`, `node:readline`, `fs`) around it. This split is what makes the web-reuse goal free: `core/` imports zero Node APIs, so v2 swaps three driven adapters and reuses the parser, model, and renderers unchanged. The recommended stack (Commander, fflate, date-fns, eta, custom Markdown writer) was filtered through "does it also run in the browser?" so the same core loads in Node and a future bundler.
-
-The single dominant risk is **locale-dependent timestamp parsing** — the export format changes by device, region, and language, and a single-format parser silently mis-dates or drops messages. This must be treated as a dedicated deep-dive phase (format-detection registry + `--day-first`/`--month-first` override), exactly as both STACK.md and ARCHITECTURE.md flag. The second risk class is **security** (XSS from chat content in HTML/MD, and path traversal on media write) — both are prevention-gated at specific components, not left to cross-cutting luck.
-
-## Key Findings
-
-### Recommended Stack
-
-A TypeScript ESM Node CLI. Commander for argument parsing, fflate streaming unzip (the only reviewed ZIP lib that also runs in the browser — directly serving the reuse requirement), `node:readline` for constant-memory line streaming, eta for WhatsApp-like static HTML, a hand-rolled Markdown writer (no dependency), and date-fns + a custom multi-locale timestamp registry for the central hard problem. tsx to run, tsup to build the distributable bin.
-
-**Core technologies:**
-- **TypeScript 5.x + Node ≥ 22.12 (ESM, `type: module`)** — type safety for the message model and clean web reuse via the same core.
-- **commander 15** — zero-dependency, TS-native arg parsing; ~25ms startup, ideal for a fixed-option transform CLI.
-- **fflate 0.8.3** — tiny streaming `Unzip` that runs in Node AND browser; memory-safe on video-heavy zips (must use the streaming API, not the buffer API).
-- **node:readline (built-in)** — one line at a time, constant memory regardless of chat size; the parser accumulates continuation lines.
-- **eta 4.6** — 3KB embedded-JS HTML templating, browser-capable, XSS-safe escaping by default; `@kitajs/html` is the JSX alternative.
-- **date-fns 4 + custom `formats.ts` registry** — library does NOT auto-detect WhatsApp locale format; the detection logic is custom work, not importable.
-- **Custom `MarkdownWriter` (no dep)** — a chat log is a linear sequence; a hand-rolled writer with one escaper beats a heavy AST lib for v1.
-- **tsx 4 / tsup 8 / picocolors 1** — standard 2025 TS-CLI toolchain (run, build bin, terminal styling).
-
-### Expected Features
-
-**Must have (table stakes):**
-- **Locale-tolerant date/time parsing** — format varies by device/region/language; single-format parsers silently mis-date. Central hard problem.
-- **Multi-line message continuation** — only the first line carries a timestamp; continuation lines must append to the prior message.
-- **Three outputs in one pass (Markdown + HTML + JSON)** — editing, viewing, and structured reuse.
-- **Media reconciliation** — map `<attached>` / bare names to sibling-folder files with smart resolution (case-insensitive, strip `(1)`, handle embedded document names).
-- **WhatsApp-like HTML rendering (bubbles, per-sender color, day grouping)** — faithful, readable backup.
-- **Preserve `<Media omitted>` & deleted messages as placeholders** — full record including gaps.
-- **Streaming / line-by-line parse** — memory-safe on large chats; project constraint.
-- **UTF-8 / encoding robustness + portable no-server output** — opens via `file://` years later.
-
-**Should have (competitive):**
-- **Optional base64 inline → single self-contained HTML** — one file opens anywhere (cap per-file size, skip video).
-- **Smart media filename resolution + per-day grouping + linkify URLs** — cheap wins that differentiate from naive parsers.
-- **Privacy-local, no upload, no telemetry** — a stated value, emphasized proudly.
-
-**Defer (v2+):**
-- Search/filter, participant aggregation, batch multiple zips, PDF/CSV/Excel output, output encryption, web UI, sticker/GIF mapping — all explicitly out of v1 scope per anti-features.
-
-### Architecture Approach
-
-Ports-and-Adapters (Hexagonal): a pure `src/core/**` (model, parser, renderers, use-case) that imports only its own `ports/` interfaces and browser-safe libs, wrapped by thin Node adapters (`fflate-archive-reader`, `readline-line-source`, `fs-output-sink`) and a single `composition/container.ts` that is the only file seeing both sides. The parser core (`parseChat(lines: AsyncIterable<string>): AsyncIterable<ChatEvent>`) depends solely on `AsyncIterable<string>`, so it can be unit-tested with plain strings and built in parallel with archive extraction. Web v2 is a port swap (browser twins of the three driven adapters + a second container), not a rewrite.
-
-**Major components:**
-1. `core/parser/*` — `parse-chat.ts` (stateful async generator), `formats.ts` (locale registry + `detectFormat`), `classify.ts`, `media-ref.ts`. The reusable crux.
-2. `core/ports/*` — `ChatArchiveReader`, `LineSource` (AsyncIterable<string>), `OutputSink`; core-owned interfaces implemented by adapters.
-3. `core/render/*` — `escape.ts` (single XSS gate), `to-json`, `to-markdown`, `to-html`; all consume the same `NormalizedMessage` model.
-4. `adapters/node/*` + `composition/container.ts` — the only place platform I/O and wiring live (v1).
-
-### Critical Pitfalls
-
-1. **C1 — Locale-dependent date/time formats** — per-file format auto-detection over a sample of header lines; support day/month ambiguity with `--day-first`/`--month-first` override; normalize non-Western digits; strip BOM/bidi marks; never invent a UTC offset. *Owning component: `parser/formats.ts`.*
-2. **C5 — XSS from chat content** — escape ALL fields (sender, body, filename, URL) at render time; allowlist `http/https/mailto` schemes; treat MD output as unsafe too. *Owning component: `render/escape.ts` (security gate).*
-3. **C6 — Path traversal on media write** — reduce every media filename to a safe basename, allowlist chars, then assert the resolved path stays inside the media dir. *Owning component: `adapters/node/fs-output-sink.ts`.*
-4. **C2/C3 — Multi-line split & false-positive headers** — stateful line reader; require the sender delimiter (`] ` / ` - `), not just a date token; ignore macOS `._*` AppleDouble files. *Owning component: `parser/parse-chat.ts` + `classify.ts`.*
-5. **C4 — Media filename mismatch & missing files** — basename, case-insensitive, strip `(1)`, tolerate iOS `<name>`/Android wrappers; emit an unresolved-media report; distinguish intentional omission from missing-but-expected. *Owning component: `parser/media-ref.ts` + `fs-output-sink.ts`.*
-
-## Implications for Roadmap
-
-The phase structure below is lifted 1:1 from ARCHITECTURE.md's build order (which maps onto PITFALLS' Phase-Specific Warnings). It is dependency-driven: the parser core is highest-risk and I/O-free, so it leads; archive extraction is parallelizable with it; renderers are mechanical once the model is fixed.
-
-### Phase 1: Model + Parser Core
-**Rationale:** Highest-risk, pure, zero-I/O piece; everything else renders its output. Can be unit-tested with plain strings (US/DE/TR/AR/pt-BR samples) before any file I/O exists.
-**Delivers:** `model/*`, `parser/parse-chat.ts`, `parser/classify.ts`, `parser/media-ref.ts`, `ports/line-source.ts`, `adapters/node/readline-line-source.ts`.
-**Addresses:** Multi-line continuation, UTF-8 robustness, classify system/omitted/deleted (table stakes).
-**Avoids:** C2, C3, M1, M2, M3, M5, N2, N3, N4.
-
-### Phase 2: Locale Detection
-**Rationale:** The detection sub-problem is separable but blocks *trustworthy* output; ship it as its own phase so the format registry gets dedicated attention.
-**Delivers:** `parser/formats.ts` (`detectFormat`) + `--day-first`/`--month-first` override + unresolved-format report.
-**Uses:** date-fns 4.
-**Implements:** C1, N2 — the flagged research-heavy area.
-
-### Phase 3: Archive Extraction (parallelizable with P1)
-**Rationale:** The parser's only I/O contract is `AsyncIterable<string>`, so the streaming `Unzip` adapter can be built in parallel with the parser; end-to-end wiring needs both.
-**Delivers:** `ports/archive-reader.ts`, `adapters/node/fflate-archive-reader.ts` (streaming `Unzip`, NOT buffer API; ignore `._*`).
-**Uses:** fflate 0.8.3.
-**Avoids:** M4 (memory), C3 (`._*` ignore).
-
-### Phase 4: Media Reconciliation + Safe Write
-**Rationale:** Depends on the parser's `MediaRef` and the archive reader; resolves names and writes files safely.
-**Delivers:** wired `media-ref.ts`, `adapters/node/fs-output-sink.ts` (safe basename), unresolved-media report.
-**Addresses:** Media reconciliation (table stakes).
-**Avoids:** C4, C6 — real sample showed documents embed their *original* filename in the body, not just WA prefixes.
-
-### Phase 5: Renderers
-**Rationale:** Low-risk once `NormalizedMessage` is fixed; JSON proves the model, MD/HTML are mechanical.
-**Delivers:** `render/escape.ts`, `to-json.ts`, `to-markdown.ts`, `to-html.ts` (eta + bubbles + per-sender color + day grouping).
-**Addresses:** Three outputs, WhatsApp-like HTML, placeholders.
-**Avoids:** C5, M2, M5 (RTL `dir=auto`).
-
-### Phase 6: CLI Wiring + Flags
-**Rationale:** Pure wiring — trivial once the use-case and adapters exist.
-**Delivers:** `cli/cli.ts`, `cli/options.ts`, `composition/container.ts`.
-**Uses:** commander 15, picocolors 1.
-**Implements:** integration of `<zip>`/`--out`/`--inline-media`/`--day-first`.
-
-### Phase 7: Inline Media (HTML)
-**Rationale:** Differentiator, low cost once media is resolved; single self-contained HTML for archiving/sharing.
-**Delivers:** `--inline-media` base64-embed, `--embed-max-mb` cap, skip video by default.
-**Avoids:** C6 (still safe basename when copying), M4.
-
-### Phase 8 (v2): Web Adapters — deferred
-**Rationale:** Swap the three driven adapters (fflate→DecompressionStream, readline→TextDecoderStream, fs→Blob/download) + a browser container; no core changes. Out of v1 scope.
-
-### Phase Ordering Rationale
-
-- **Parser-first** because it owns the riskiest pitfalls (C1, C2, C3, M1–M5, N2–N4) and is I/O-free — it can be validated before any archive code exists.
-- **Archive extraction parallelizes with the parser** because the contract is just `AsyncIterable<string>`; two parallel sub-agents can build P1 and P3 simultaneously.
-- **Renderers come after the model stabilizes** — JSON validates the shape, MD/HTML are mechanical; the `escape.ts` gate is mandatory before HTML ships.
-- **CLI is last wiring** — lowest risk, depends on everything.
-- The Hexagonal split means every pitfall maps to a *located* component, so none is left to cross-cutting luck.
-
-### Research Flags
-
-Phases likely needing deeper research during planning:
-- **Phase 2 (Locale Detection):** the hardest, MEDIUM-confidence area; needs a dedicated format-registry design pass (non-Western digits, localized AM/PM, RTL, 2-vs-4-digit years). Recommend `/gsd-plan-phase --research-phase 2`.
-- **Phase 4 (Media Reconciliation):** real-sample edge cases (documents embed original filename; nested ZIP; `._*` files) warrant a design spike before coding.
-
-Phases with standard patterns (skip research-phase):
-- **Phase 1, 3, 5, 6:** well-documented hexagonal/Node patterns; the stack and component boundaries are confirmed by existing parsers and official docs. Build directly.
-
-## Confidence Assessment
-
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Stack | HIGH | Unanimous, version-verified via `npm view`; browser-reuse picks confirmed. |
-| Features | MEDIUM | Format/structure facts corroborated across ≥5 independent tools; tool-specific feature tiers are indicative (verify at build). |
-| Architecture | HIGH | Hexagonal-in-Node validated by nazarboyko write-up + readline async-iterator docs + real-sample inspection. |
-| Pitfalls | MEDIUM–HIGH | Parsing facts corroborated across 3+ parsers; security facts from published CVE advisories. |
-
-**Overall confidence:** HIGH (structure/stack/architecture), with one MEDIUM pocket (locale date detection) that is explicitly flagged for a research phase.
-
-### Gaps to Address
-
-- **Locale detection breadth:** the `formats.ts` registry must be validated against real US/DE/TR/AR/pt-BR/CJK samples; treat registry coverage as a planning deliverable for Phase 2, not assumed.
-- **Real-sample coverage:** only one export (`Notas pessoais.zip`, pt-BR) was inspected first-hand. Add a US, a German/Android (`.` separators), and an Arabic/Persian (non-Western digits) sample to the Phase 1–2 test fixtures before claiming broad locale support.
-- **iPhone ~40k truncation:** detection/warning is a Phase 3/5 concern; confirm how to surface "export looks truncated" without false alarms.
-- **Nested ZIP handling:** port must not preclude it, but v1.1 only; confirm behavior (flag vs skip) during Phase 3 planning.
-
-## Sources
-
-### Primary (HIGH confidence)
-- Hexagonal / Ports-and-Adapters in Node.js (nazarboyko.com, 2024) — validates `core/`/`adapters/`/`composition/` split.
-- Node.js `readline` docs (nodejs.org, v26) — `createInterface` + `for await` yields one line, constant memory; basis for `LineSource` port.
-- Isomorphic line-reader packages `readlineiter`/`fetchline` (npm) — prove `AsyncIterable<string>` works in Node/Deno/browser.
-- `npm view <pkg> version` for every listed package (2026-08-21) — authoritative current versions.
-- First-hand inspection of `WhatsApp Chat - Notas pessoais.zip` — confirmed pt-BR bracket format, bidi marks, deleted/omitted markers, embedded doc filename, nested ZIP.
-
-### Secondary (MEDIUM confidence)
-- whatsapp-chat-parser (npm, TS), whatsapp-export-md (PyPI), whatsapp-chat-to-pdf (PyPI), WhatsApp-Chat-Exporter (GitHub) — feature/format landscape and known failure modes.
-- whatsapp-export-parser (NeverFar) — format reference, non-Western digits, bidi/BOM stripping, system-message handling.
-- whatstk docs — header format codes per device/OS/language.
-- CVE advisories: open-webui (GHSA-9f4f-jv96 / GHSA-pwxh-7358 / GHSA-hcwp-82g6), Orbis chat-widget XSS via `sender_name`, Discourse CVE-2024-52794 (image filename), nanobot GHSA-3f63-vcp3-hvqr (path traversal) — security facts for C5/C6.
+The requirement is solved and low-risk: verify each reconciled media file by size +
+a cryptographic hash, and when two referenced files are byte-identical, store the
+bytes once and point every reference at that single copy. The dominant research
+value is in scoping *what not to build* and pinning *end-user behavior*, not in
+discovering new technique.
 
 ---
 
-*Research completed: 2026-08-21*
-*Ready for roadmap: yes*
+## Key Findings
+
+Consolidated, de-duplicated decisions across STACK / FEATURES / ARCHITECTURE /
+PITFALLS:
+
+**Hashing primitive — zero new runtime deps.**
+- Use Node's built-in `node:crypto` `createHash('sha256')` as a **streaming
+  Transform** wired into the existing `extractEntry()` pipe (`pipeline(source, hash,
+  writeStream)`), so bytes are hashed exactly once while written — constant memory
+  regardless of video size (satisfies the v1 memory-safety / PARSE-02 constraint).
+- **SHA-256, never MD5/SHA-1/size** as the identity key. MD5/SHA-1 have practical
+  collision attacks; size-only keying causes silent corruption. SHA-256 collision
+  bound ≈ 2^128 → treated as definitive equality (production tools do not
+  byte-compare on match).
+- Never hash in-memory (`fs.readFile` + `createHash` on a multi-GB video → OOM).
+  Never hash the already-inlined base64 — dedup works only on raw bytes at
+  extraction time, before any encoding.
+
+**Content-addressed storage (CAS) layout — no filesystem links.**
+- Store each unique file once as `media/<sha256[:16]>.<ext>` (16-hex prefix ≈ 2^64
+  space per chat; bump to full 64 only for a future global cross-backup store).
+  Extension preserved from the zip entry so browsers / `mimeFromExt` keep working.
+- **No hardlinks, no symlinks.** CAS already stores each blob once, so disk is saved
+  portably. Links break on exFAT/FAT32/ReFS and cross-volume, and break the core
+  "folder opens standalone in any browser, survives copy/zip" value. If a
+  `--hardlink` polish is ever added, it must fall back to copy on
+  `EXDEV|EPERM|EACCES|ENOTSUP` — never on the critical path.
+
+**Two-stage size-then-hash (memory + CPU safety).**
+- Stage 1: group by size. A unique size ⇒ file cannot be a duplicate ⇒ copied as-is,
+  never hashed (most media in a chat have distinct sizes, so this eliminates the vast
+  majority of hash work for free).
+- Stage 2: within a same-size group, compute SHA-256; group by digest; >1 member =
+  duplicate set. On a SHA-256 match, an optional cheap size re-check (Borg's
+  safeguard) is default-on, zero-cost.
+
+**Manifest as the re-render bridge.**
+- Emit `media/manifest.json` mapping **every original ref →
+  `{relPath, hash, size, mime}`** (one entry per original ref; all refs sharing a
+  hash point at the same canonical file). This is the artifact that (a) enables
+  content dedup, (b) makes "verify by size + hash" a first-class deliverable, and
+  (c) fixes today's fragile filename-based re-render: `buildMediaMap` reads the
+  manifest **keyed by exact original ref** (normalized-name fallback only for
+  legacy/odd refs), so a later `--inline` re-render from CSV+folder (no ZIP) still
+  resolves media.
+- The manifest is **derived and regenerated every run** from current refs;
+  `messages.csv` stays the sole source of truth. Never read the manifest as input
+  (prevents staleness/rot on re-run with a different export).
+- Determinism: canonical selection = **first-occurrence rule** (sort colliding refs
+  by stable message index) so identical ZIP ⇒ byte-identical `media/` across
+  runs/machines.
+
+**Integration seam — media layer only, renderers untouched.**
+- `reconcileMedia` does the hash + temp→rename dedup + manifest write; `buildMediaMap`
+  becomes manifest-first with a legacy directory-scan fallback (preserves v1.0
+  backups and existing `test/media.test.ts` assertions). `Message` / `messages.csv`
+  schema is unchanged. The three renderers consume only `MediaEntry.relPath`, which
+  now points at the canonical hash file — **no renderer logic change** required.
+- Idempotent re-runs: temp file written to `media/.tmp-<uuid>`, `unlink` in
+  `finally`, atomic rename; re-running yields identical `media/`, never grows.
+
+**`--inline` caveat (document, don't "fix").**
+- Dedup always applies to the on-disk `media/` copy. With `--inline`, the single HTML
+  embeds each occurrence as an independent base64 blob, so the HTML file itself does
+  **not** shrink from dedup (it's one self-contained file by design). Do **not**
+  attempt cross-occurrence base64 sharing inside one HTML for v1.1.
+
+**Optional pre-filter — `xxhash-wasm@1.1.0` (deferred / optional).**
+- WASM (no native binary), runs in Node + browser, ~10–50× faster than SHA-256. Used
+  only as a two-stage gate to skip SHA-256 on obvious mismatches; SHA-256 stays the
+  authoritative key. **Core ships fine with SHA-256 only**; add xxhash later if
+  profiling shows hashing is a bottleneck. Reject `@node-rs/xxhash` (native, breaks
+  browser-reuse) and `xxhashjs` (10–350× slower).
+
+**What NOT to build (anti-features):** chunk-level/CDC dedup (Rabin/FastCDC — for
+edit-resilience, irrelevant to byte-identical re-exports); links as the default
+mechanism; mutating previously generated backups; network/remote hash index; external
+DB/index outside the output folder; perceptual/near-dup matching; fuzzy base64
+sharing in inlined HTML.
+
+---
+
+## Implications for Roadmap
+
+Build order is dictated by hard dependencies: hash must exist before the dedup
+*decision*; the dedup decision + manifest write must exist before `buildMediaMap` can
+switch to manifest-backed; renderers are last (verification only). Phases 1→2→3 below
+also map cleanly to the PITFALLS phase structure (MED-DEDUP-1/2/3).
+
+1. **Streaming hash primitive** — add the SHA-256 `Transform` to `extractEntry`,
+   return `{hash, size}`, write to a caller temp path. No behavioral change yet.
+   Isolates the only novel memory-critical piece; unit-testable standalone.
+   *Avoids P6 (must stay streaming), P9 (hash raw bytes), P2 (temp cleanup).*
+
+2. **CAS naming + dedup in `reconcileMedia`** — compute `relPath` from hash,
+   temp→rename, skip write if exists; collect **all** original refs per hash; emit
+   `duplicatesRemoved` / `bytesSaved`. *Avoids P1 (don't break re-render yet —
+   closed in step 3), P4 (ext/type on collision), P7 (no links), P11 (AppleDouble),
+   P12 (ext preserved).*
+
+3. **`media/manifest.ts` (new) + `buildMediaMap` manifest-first with legacy
+   fallback** — once Step 2 produces the manifest, `buildMediaMap` stops guessing by
+   filename. Fallback preserves old backups + existing tests; **closes P1/P3** (the
+   re-render break). *Avoids P8 (key by exact ref, not normalized), P14 (regenerate
+   every run), P17 (model untouched).*
+
+4. **Savings report + renderer verification** — extend `runParser` stderr report
+   (`N duplicates removed, Y MB saved`, accurate counting per P16); verify renderers
+   need no change; optionally add a per-render base64 cache keyed by `relPath` for
+   `--inline` (P5 optimization, not required). Add `media-manifest` unit tests +
+   integration test asserting `bytesSaved > 0`.
+
+5. **Tests / idempotency certification (≈ MED-DEDUP-3)** — snapshot test of
+   byte-identical re-runs; re-render-from-CSV test; exFAT link-free verification;
+   collision + corrupt-entry fixtures (P3, P7, P10, P14, P15, P18).
+
+**Optional / deferred:** `--hardlink` opt-in (default OFF, copy-fallback);
+hash-abstraction (BLAKE3 option); cross-chat persistent global CAS
+(`~/.wa-backup/store`); `--verify` integrity re-hash (cheap once manifest exists).
+**Optional fast pre-filter:** `xxhash-wasm` — verify tsup WASM inlining during the
+build phase (MEDIUM confidence); ship SHA-256-only if it misbehaves.
+
+**Research flags for the roadmapper:**
+- **Needs deeper phase research:** MED-DEDUP-1 (exact `extractEntry` hook point and
+  manifest schema design), MED-DEDUP-2 (bounded-concurrency number 8 vs 16),
+  MED-DEDUP-3 (exFAT CI verification approach).
+- **Standard patterns, skip research:** CAS-at-reconcile, streaming SHA-256 via
+  `node:crypto`, manifest-first `buildMediaMap` — all corroborated and source-verified.
+
+---
+
+## Sources
+
+- `.planning/research/STACK.md` — Media Deduplication (v1.1) stack research:
+  SHA-256 streaming via `node:crypto`, CAS layout, `xxhash-wasm` optional pre-filter,
+  hardlink trade-off, no-new-dep conclusion. (HIGH confidence)
+- `.planning/research/FEATURES.md` — Feature landscape: two-stage size+hash
+  mechanism, table-stakes / differentiators / anti-features, `--inline` caveat, MVP
+  dependency order. (HIGH mechanism / MEDIUM integration)
+- `.planning/research/ARCHITECTURE.md` — Verified against actual source:
+  CAS-at-reconcile + `MediaManifest` bridge, `reconcileMedia`/`buildMediaMap`
+  rewrites, model untouched, 7-step build order, 9 feature pitfalls. (HIGH)
+- `.planning/research/PITFALLS.md` — 18 pitfalls (10 critical/moderate/minor) with
+  prevention + detection + phase assignment (MED-DEDUP-1/2/3), cross-platform link
+  limits, streaming-hash API. (HIGH)

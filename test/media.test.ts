@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -7,6 +7,7 @@ import { zipSync } from 'fflate';
 import { runParser } from '../src/model';
 import { slugifyChatName } from '../src/extract';
 import { readCsv } from '../src/csv';
+import type { Message } from '../src/parse/types';
 import {
   normalizeMediaName,
   mimeFromExt,
@@ -14,10 +15,15 @@ import {
   INLINE_MAX_BYTES,
   reconcileMedia,
   buildMediaMap,
+  setActiveReconcileMap,
 } from '../src/media';
 
 const ROOT = process.cwd();
 const NOTAS_ZIP = path.join(ROOT, 'fixtures', 'WhatsApp Chat - Notas pessoais.zip');
+
+afterEach(() => {
+  setActiveReconcileMap(null);
+});
 
 test('normalizeMediaName: case + (1) + dash/space tolerance', () => {
   assert.equal(
@@ -74,18 +80,51 @@ test('reconcileMedia on Notas pessoais sample: 17 resolved, 0 unresolved', async
   assert.equal(res.resolved.length, 17, 'all 17 refs resolved');
   assert.equal(res.unresolved.length, 0, 'no unresolved refs');
   const files = fs.readdirSync(path.join(outDir, 'media')).sort();
-  assert.equal(files.length, 17);
-  assert.ok(
-    files.includes('00000089-VIDEO-2026-05-27-17-26-38.mp4'),
-    'video copied',
+  assert.ok(files.length >= 1 && files.length <= 17, 'files collapsed to CAS names');
+  for (const f of files) {
+    assert.ok(
+      /^[0-9a-f]{16}\.[a-z0-9]+$/i.test(f),
+      `CAS filename expected, got ${f}`,
+    );
+  }
+  const videoEntry = res.mediaMap.get('00000089-VIDEO-2026-05-27-17-26-38.mp4');
+  assert.ok(videoEntry, 'video ref in mediaMap');
+  assert.equal(
+    videoEntry!.relPath,
+    `media/${files.find((f) => f.endsWith('.mp4'))}`,
+    'relPath points at the canonical mp4',
   );
-  assert.ok(
-    files.includes('00000152-96980389904-IRPF-D-0-0211-31-07-2026-08-03.pdf'),
-    'pdf copied',
-  );
+  assert.equal(videoEntry!.mime, 'video/mp4');
+});
+
+test('CAS: byte-identical different names stored once, both refs resolve', async () => {
+  const blob = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9]);
+  const z = zipSync({
+    'c/_chat.txt': Buffer.from(''),
+    'c/A.png': blob,
+    'c/B.png': blob,
+  });
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'dup-'));
+  const zp = path.join(d, 'a.zip');
+  fs.writeFileSync(zp, z);
+  const o = fs.mkdtempSync(path.join(os.tmpdir(), 'o-'));
+  const res = await reconcileMedia(zp, o, ['A.png', 'B.png']);
+  const files = fs.readdirSync(path.join(o, 'media'));
+  assert.equal(files.length, 1, 'one canonical file (dedup)');
+  assert.equal(res.mediaMap.size, 2, 'both refs recorded');
+  const ra = res.mediaMap.get('A.png')!.relPath;
+  const rb = res.mediaMap.get('B.png')!.relPath;
+  assert.equal(ra, rb, 'refs share the canonical relPath');
+  const messages = [
+    { media: 'A.png' },
+    { media: 'B.png' },
+  ] as unknown as Message[];
+  const m = buildMediaMap(o, messages);
+  assert.equal(m.get('A.png')!.relPath, m.get('B.png')!.relPath);
 });
 
 test('buildMediaMap: resolves disk files tolerant of (1) variance + inlineable flag', () => {
+  setActiveReconcileMap(null);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-mt-map-'));
   // media file stored with a (1) duplicate marker; ref omits it.
   fs.mkdirSync(path.join(dir, 'media'), { recursive: true });

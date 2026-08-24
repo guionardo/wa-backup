@@ -3,7 +3,15 @@ import { open } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import * as zlib from 'node:zlib';
 import * as path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { Transform } from 'node:stream';
 import type { Message } from './parse/types';
+
+export const MEDIA_HASH_PREFIX_LEN = 16;
+
+export function canonicalMediaName(hash: string, ext: string): string {
+  return `${hash.slice(0, MEDIA_HASH_PREFIX_LEN)}${ext.toLowerCase()}`;
+}
 
 /**
  * Maximum byte size for a media file to be eligible for `--inline` base64
@@ -124,7 +132,7 @@ async function extractEntry(
   zipPath: string,
   entry: ZipEntryMeta,
   outPath: string,
-): Promise<void> {
+): Promise<{ hash: string; size: number }> {
   const fh = await open(zipPath, 'r');
   try {
     const lh = Buffer.alloc(30);
@@ -137,14 +145,25 @@ async function extractEntry(
       end: dataStart + entry.compressedSize - 1,
     });
     const ws = createWriteStream(outPath);
+    const hash = createHash('sha256');
+    let size = 0;
+    const hashTransform = new Transform({
+      transform(chunk, _enc, cb) {
+        hash.update(chunk);
+        size += chunk.length;
+        cb(null, chunk);
+      },
+    });
     const source =
       entry.compression === 0 ? rs : rs.pipe(zlib.createInflateRaw());
     await new Promise<void>((res, rej) => {
       source.on('error', rej);
+      hashTransform.on('error', rej);
       ws.on('error', rej);
       ws.on('close', res);
-      source.pipe(ws);
+      source.pipe(hashTransform).pipe(ws);
     });
+    return { hash: hash.digest('hex'), size };
   } finally {
     await fh.close();
   }
@@ -155,6 +174,14 @@ export interface ReconcileResult {
   resolved: string[];
   /** Distinct refs with no matching entry. */
   unresolved: string[];
+  /** Every resolved ref -> its canonical content-addressed MediaEntry. */
+  mediaMap: Map<string, MediaEntry>;
+}
+
+let activeReconcileMap: Map<string, MediaEntry> | null = null;
+
+export function setActiveReconcileMap(m: Map<string, MediaEntry> | null): void {
+  activeReconcileMap = m;
 }
 
 /**
@@ -194,18 +221,46 @@ export async function reconcileMedia(
 
   const resolvedSet = new Set<string>();
   const resolved: string[] = [];
+  const mediaMap = new Map<string, MediaEntry>();
   const writes: Promise<void>[] = [];
   for (const [norm, ref] of refsNormalized) {
     const meta = index.get(norm);
     if (!meta) continue; // unreferenced / missing -> unresolved
     const base = meta.name.split('/').pop()!;
+    const ext = path.extname(base);
     writes.push(
-      extractEntry(zipPath, meta, path.join(mediaDir, base)).then(() => {
-        if (!resolvedSet.has(ref)) {
-          resolvedSet.add(ref);
-          resolved.push(ref);
+      (async () => {
+        const tmp = path.join(mediaDir, '.tmp-' + randomUUID());
+        try {
+          const { hash, size } = await extractEntry(zipPath, meta, tmp);
+          const canonicalName = canonicalMediaName(hash, ext);
+          const canonicalPath = path.join(mediaDir, canonicalName);
+          if (fs.existsSync(canonicalPath)) {
+            fs.unlinkSync(tmp);
+          } else {
+            fs.renameSync(tmp, canonicalPath);
+          }
+          const mime = mimeFromExt(ext);
+          const entry: MediaEntry = {
+            relPath: `media/${canonicalName}`,
+            mime,
+            size,
+            inlineable: isInlineable(mime, size),
+          };
+          mediaMap.set(ref, entry);
+          if (!resolvedSet.has(ref)) {
+            resolvedSet.add(ref);
+            resolved.push(ref);
+          }
+        } catch (err) {
+          try {
+            fs.unlinkSync(tmp);
+          } catch {
+            /* ignore */
+          }
+          throw err;
         }
-      }),
+      })(),
     );
   }
   await Promise.all(writes);
@@ -213,7 +268,8 @@ export async function reconcileMedia(
   const unresolved = [...refsNormalized.values()].filter(
     (r) => !resolvedSet.has(r),
   );
-  return { resolved, unresolved };
+  setActiveReconcileMap(mediaMap);
+  return { resolved, unresolved, mediaMap };
 }
 
 export interface MediaEntry {
@@ -255,6 +311,10 @@ export function buildMediaMap(
   const map = new Map<string, MediaEntry>();
   for (const m of messages) {
     if (!m.media) continue;
+    if (activeReconcileMap && activeReconcileMap.has(m.media)) {
+      map.set(m.media, activeReconcileMap.get(m.media)!);
+      continue;
+    }
     const hit = index.get(normalizeMediaName(m.media));
     if (!hit) continue; // missing-but-expected: not in map
     const full = path.join(mediaDir, hit);

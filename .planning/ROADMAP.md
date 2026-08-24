@@ -18,7 +18,7 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
 
 </details>
 
-- [ ] **Phase 4: Streaming Hash & Content-Addressed Store** - MEDIA-05, MEDIA-06 — hash each file with `node:crypto` SHA-256 in the extract pipe and store unique bytes once as `media/<sha256[:16]>.<ext>`
+- [x] **Phase 4: Streaming Hash & Content-Addressed Store** - MEDIA-05, MEDIA-06 — hash each file with `node:crypto` SHA-256 in the extract pipe and store unique bytes once as `media/<sha256[:16]>.<ext>` — completed 2026-08-24
 - [ ] **Phase 5: Manifest Bridge & Deterministic Canonical Selection** - MEDIA-07, MEDIA-08 — emit `media/manifest.json` and make `buildMediaMap` manifest-first with legacy fallback; first-occurrence canonical selection
 - [ ] **Phase 6: Savings Report, `--no-dedupe`, & Tests** - MEDIA-09, MEDIA-10 — report dedup savings to stderr, add `--no-dedupe` flag, certify with tests
 
@@ -29,13 +29,13 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
 **Depends on**: Phase 3 (existing `reconcileMedia`/`extractEntry` in `src/media.ts`)
 **Requirements**: MEDIA-05, MEDIA-06
 **Plans**: 1 plan
-- [ ] 04-PLAN.md — Streaming SHA-256 hash in extractEntry + content-addressed store (media/<sha256[:16]>.<ext>), skip-if-exists dedup, in-run relPath bridge (renderers untouched)
+- [x] 04-PLAN.md — Streaming SHA-256 hash in extractEntry + content-addressed store (media/<sha256[:16]>.<ext>), skip-if-exists dedup, in-run relPath bridge (renderers untouched)
 **Success Criteria** (what must be TRUE):
   1. Running the tool on an export containing byte-identical media yields fewer files in `media/` than the number of distinct message-media refs, and no duplicate bytes exist on disk (verifiable by deduplicating refs that point at the same file).
   2. Each stored media file is named `media/<sha256[:16]>.<ext>` (extension preserved from the zip entry) so `mimeFromExt` and the browser still resolve/display it.
   3. The generated backup opens standalone in any browser and every message's media displays correctly — dedup is invisible to readers, visible only as reduced disk usage.
-  4. A large export (e.g. a multi-GB video) completes without buffering the whole file in memory (the SHA-256 `Transform` is wired into the `extractEntry` pipe, hashing bytes exactly once while written).
-**Plans**: TBD
+   4. A large export (e.g. a multi-GB video) completes without buffering the whole file in memory (the SHA-256 `Transform` is wired into the `extractEntry` pipe, hashing bytes exactly once while written).
+**Plans**: 1/1 complete
 
 ### Phase 5: Manifest Bridge & Deterministic Canonical Selection
 **Goal**: A machine-readable `media/manifest.json` maps every original media ref to its canonical hash file, `buildMediaMap` resolves media by exact ref (with legacy directory-scan fallback), and duplicate sets always pick the same canonical copy so re-runs are reproducible.

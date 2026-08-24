@@ -74,12 +74,12 @@ that bridge as `media/manifest.json` and makes `buildMediaMap` read it.
   `--inline`, and later with a `--no-dedupe` flag from Phase 6). Written atomically
   (`.tmp-<uuid>` → `renameSync`).
 
-### Carried forward from Phase 4
+### Carried forward from Phase 4 (locked in phase 04; not re-tracked as new decisions here)
 
-- **D-01** filename `media/<sha256[:16]>.<ext>` (ext preserved).
-- **D-04** trust-the-stream skip-if-exists (no re-verify of written bytes).
-- **D-05** original→canonical mapping via `MediaEntry.relPath`; renderers/model untouched.
-- **D-06** no new deps; no hardlinks/symlinks; memory-safe streaming.
+- D-01 (Phase 4): filename `media/<sha256[:16]>.<ext>` (ext preserved).
+- D-04 (Phase 4): trust-the-stream skip-if-exists (no re-verify of written bytes).
+- D-05 (Phase 4): original→canonical mapping via `MediaEntry.relPath`; renderers/model untouched.
+- D-06 (Phase 4): no new deps; no hardlinks/symlinks; memory-safe streaming.
 
 ---
 

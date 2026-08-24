@@ -1,0 +1,19 @@
+{
+  "phase": 6,
+  "phase_dir": "06-savings-report-no-dedupe-tests",
+  "name": "Savings Report, `--no-dedupe`, & Tests",
+  "status": "discuss-complete",
+  "context_committed": "de9073f",
+  "discussed_areas": ["--no-dedupe naming"],
+  "decisions": {
+    "D-06.1": "With --no-dedupe on, store files by original ref: media/<ref> (m.media from _chat.txt); dedup-on keeps CAS media/<sha256[:16]>.<ext> (Phase 4 D-01).",
+    "D-06.2": "Under --no-dedupe, on name collision (incl. case-insensitive FS) append a short disambiguator (-2 / <shortsha>); never overwrite."
+  },
+  "carried_defaults": [
+    "manifest still written under --no-dedupe with original relPath + full 64-hex hash (D-05.1); duplicatesRemoved/bytesSaved = 0",
+    "MEDIA-09: keep Phase 5 dedup savings stderr line; add separate --inline inlined-bytes line",
+    "MEDIA-10: flag --no-dedupe (opt-out; dedup default)",
+    "tests: --no-dedupe round-trip + collision, savings line present, --inline dedup interaction"
+  ],
+  "ready_for_planning": true
+}

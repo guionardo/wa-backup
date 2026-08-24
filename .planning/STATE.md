@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Media Hygiene
-current_phase: 05
-status: completed
-stopped_at: Phase 4 plan created
-last_updated: "2026-08-24T12:39:28.788Z"
+current_phase: 06
+status: discuss
+stopped_at: Phase 6 discuss complete
+last_updated: "2026-08-24T12:50:00.000Z"
 last_activity: 2026-08-24
-last_activity_desc: Phase 04 marked complete
+last_activity_desc: Phase 06 discuss complete — --no-dedupe naming (D-06.1/D-06.2)
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 2
   total_plans: 2
   completed_plans: 2
-current_phase_name: manifest-bridge
-state_head: f18d823cdf5f385c9daabe81df90c6853a720127
+current_phase_name: savings-report-no-dedupe-tests
+state_head: de9073fcd3f5a3c9daabe81df90c6853a720127
 ---
 
 # STATE.md
@@ -33,19 +33,19 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 | 2 | ✓ Complete | 1/1 | 100% |
 | 3 | ✓ Complete | 1/1 | 100% |
 | 4 | ✓ Complete | 1/1 | 100% |
-| 5 | ○ Not started | 0/TBD | 0% |
-| 6 | ○ Not started | 0/TBD | 0% |
+| 5 | ✓ Complete | 1/1 | 100% |
+| 6 | ● Discuss complete | 0/TBD | 0% |
 
 ## Current Position
 
-Phase: 05 — COMPLETE
-Plan: 1 of 1
-Status: Phase 05 complete
-Last activity: 2026-08-24 — Phase 05 marked complete
+Phase: 06 — DISCUSS COMPLETE
+Plan: 0/TBD
+Status: Phase 06 discuss complete — ready for /gsd-plan-phase 6
+Last activity: 2026-08-24 — Phase 06 discuss complete
 
 ## Active Feature
 
-Phase 04 streaming-hash-content-addressed-store — MEDIA-05/MEDIA-06: SHA-256 Transform in `extractEntry` + CAS naming `media/<sha256[:16]>.<ext>` in `reconcileMedia`.
+Phase 06 savings-report-no-dedupe-tests — MEDIA-09 (dedup savings report to stderr) + MEDIA-10 (`--no-dedupe` opt-out flag) + Tests.
 
 ## Recent Activity
 
@@ -57,9 +57,9 @@ Phase 04 streaming-hash-content-addressed-store — MEDIA-05/MEDIA-06: SHA-256 T
 
 ## Session
 
-**Last session:** 2026-08-24T12:06:35.809Z
-**Stopped at:** Phase 4 plan created
-**Resume file:** .planning/phases/04-streaming-hash-content-addressed-store/04-PLAN.md
+**Last session:** 2026-08-24T12:50:00.000Z
+**Stopped at:** Phase 6 discuss complete
+**Resume file:** .planning/phases/06-savings-report-no-dedupe-tests/06-CONTEXT.md
 
 ## Performance Metrics
 
@@ -89,7 +89,9 @@ Phase 04 streaming-hash-content-addressed-store — MEDIA-05/MEDIA-06: SHA-256 T
 - [Phase 03]: disk-resident `buildMediaMap(dir, messages)` decouples renderers from the zip — re-render from CSV works without the archive (D-M5)
 - [Phase 03]: `--inline` embeds inlineable files (< 8 MiB, non-video) as `data:` URIs; video/oversized stay placeholders; unresolved refs reported to stderr, never crash (MEDIA-03/04)
 - [Phase 04-06 v1.1]: SHA-256 via `node:crypto` streaming Transform in `extractEntry` (constant memory); CAS `media/<sha256[:16]>.<ext>`; no hardlinks/symlinks; `media/manifest.json` regenerated every run from refs (messages.csv stays source-of-truth); first-occurrence canonical selection; `--no-dedupe` opt-out (research: HIGH confidence)
+- [Phase 06 D-06.1]: `--no-dedupe` stores files by original ref `media/<ref>` (m.media from _chat.txt); dedup-on keeps CAS naming. One consistent key across manifest/buildMediaMap/csv.
+- [Phase 06 D-06.2]: Under `--no-dedupe`, on name collision (incl. case-insensitive FS) append a short disambiguator (`-2` / `<shortsha>`); never overwrite.
 
 ## Operator Next Steps
 
-- Begin Phase 4 with /gsd-plan-phase 4
+- Begin Phase 6 planning with /gsd-plan-phase 6 --skip-research

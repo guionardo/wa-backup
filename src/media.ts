@@ -200,10 +200,13 @@ export async function reconcileMedia(
   dir: string,
   refs: string[],
 ): Promise<ReconcileResult> {
-  const refsNormalized = new Map<string, string>(); // normalized -> original ref
+  const refsByNorm = new Map<string, string[]>(); // normalized -> every original ref
   for (const r of refs) {
     const n = normalizeMediaName(r);
-    if (n) refsNormalized.set(n, r);
+    if (!n) continue;
+    const list = refsByNorm.get(n) ?? [];
+    list.push(r);
+    refsByNorm.set(n, list);
   }
 
   const mediaDir = path.join(dir, 'media');
@@ -223,7 +226,7 @@ export async function reconcileMedia(
   const resolved: string[] = [];
   const mediaMap = new Map<string, MediaEntry>();
   const writes: Promise<void>[] = [];
-  for (const [norm, ref] of refsNormalized) {
+  for (const [norm, refList] of refsByNorm) {
     const meta = index.get(norm);
     if (!meta) continue; // unreferenced / missing -> unresolved
     const base = meta.name.split('/').pop()!;
@@ -247,10 +250,12 @@ export async function reconcileMedia(
             size,
             inlineable: isInlineable(mime, size),
           };
-          mediaMap.set(ref, entry);
-          if (!resolvedSet.has(ref)) {
-            resolvedSet.add(ref);
-            resolved.push(ref);
+          for (const ref of refList) {
+            mediaMap.set(ref, entry);
+            if (!resolvedSet.has(ref)) {
+              resolvedSet.add(ref);
+              resolved.push(ref);
+            }
           }
         } catch (err) {
           try {
@@ -265,7 +270,7 @@ export async function reconcileMedia(
   }
   await Promise.all(writes);
 
-  const unresolved = [...refsNormalized.values()].filter(
+  const unresolved = [...refsByNorm.values()].flat().filter(
     (r) => !resolvedSet.has(r),
   );
   setActiveReconcileMap(mediaMap);

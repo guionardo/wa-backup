@@ -2,16 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 03
-current_phase_name: media-reconciliation-embedding
-status: completed
-stopped_at: Phase 3 plan 03-01 verified (passed)
-last_updated: "2026-08-23T00:00:00.000Z"
+status: Awaiting next milestone
+stopped_at: Phase 2 context gathered
+last_updated: "2026-08-24T10:40:50.300Z"
+last_activity: 2026-08-24
+last_activity_desc: Milestone v1.0 completed and archived
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 8
   completed_plans: 8
+current_phase: 03
+current_phase_name: media-reconciliation-embedding
 ---
 
 # STATE.md
@@ -32,9 +34,10 @@ See: .planning/PROJECT.md (updated 2026-08-21)
 
 ## Current Position
 
-**Phase:** 03 (media-reconciliation-embedding) — COMPLETE
-**Plan:** 1 of 1
-**Status:** Phase 03 complete — media reconciliation & embedding shipped
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-24 — Milestone v1.0 completed and archived
 
 ## Active Feature
 
@@ -89,3 +92,7 @@ Phase 01 parsing-model-core — streaming tracer parser delivered (01-01 ✓).
 - [Phase 03]: match by entry BASENAME (not full path) so zips with a folder prefix also reconcile (MEDIA-01 robustness)
 - [Phase 03]: disk-resident `buildMediaMap(dir, messages)` decouples renderers from the zip — re-render from CSV works without the archive (D-M5)
 - [Phase 03]: `--inline` embeds inlineable files (< 8 MiB, non-video) as `data:` URIs; video/oversized stay placeholders; unresolved refs reported to stderr, never crash (MEDIA-03/04)
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

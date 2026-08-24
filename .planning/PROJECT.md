@@ -17,22 +17,36 @@ WhatsApp installed. This tool exists to turn that export into a portable, easily
 (Markdown, HTML, JSON) you can open in any browser — freeing the phone without losing the
 conversation.
 
+## Current State
+
+**Shipped: v1.0 MVP (2026-08-24) — published to npm as `wa-backup@0.1.1`.**
+
+- 3 phases, 8 plans, 14 tasks across 93 commits.
+- Streaming, locale-tolerant parser → `messages.csv` source-of-truth.
+- Three synchronized outputs (JSON / Markdown / WhatsApp-like HTML), XSS-safe.
+- Media reconciliation + `--inline` base64 embedding; placeholders preserved.
+- URL title enrichment (YouTube, Reddit, LinkedIn, Medium, Stack Overflow, X) with favicons.
+- Green CI (lint → test → build) on Node 22/24; npm publish with provenance.
+- Full README, public GitHub repo.
+
 ## Requirements
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ CLI parses a WhatsApp export ZIP into a normalized message model — v1.0
+- ✓ CLI emits Markdown, HTML, and JSON representations of the chat — v1.0
+- ✓ HTML output renders messages in a WhatsApp-like layout (bubbles, per-sender color, timestamps) — v1.0
+- ✓ Media files placed in a local folder, referenced by relative path — v1.0
+- ✓ A flag inlines media as base64 into a single HTML file — v1.0
+- ✓ `<Media omitted>` and deleted-message lines preserved as visible placeholders — v1.0
+- ✓ Parser handles large files without loading the whole transcript into memory — v1.0
+- ✓ Output defaults to a chat-named folder; `--out` overrides it — v1.0
+- ✓ Web link titles resolved (YouTube/Reddit/LinkedIn/Medium/Stack Overflow/X) — v1.0
 
-### Active
+### Active (next milestone)
 
-- [ ] CLI parses a WhatsApp export ZIP into a normalized message model
-- [ ] CLI emits Markdown, HTML, and JSON representations of the chat
-- [ ] HTML output renders messages in a WhatsApp-like layout (bubbles, per-sender color, timestamps)
-- [ ] Media files are placed in a local folder and referenced by relative path
-- [ ] A flag inlines media as base64 into a single HTML file
-- [ ] `<Media omitted>` and deleted-message lines are preserved as visible placeholders
-- [ ] Parser handles large files without loading the whole transcript into memory
-- [ ] Output defaults to a chat-named folder; an optional `--out` path overrides it
+- [ ] Media deduplication: verify media by size + hash to detect duplicates and save disk space
+- [ ] (propose more in `/gsd-new-milestone`)
 
 ### Out of Scope
 
@@ -45,14 +59,14 @@ conversation.
 
 ## Context
 
-- Input is the **email/export ZIP** from WhatsApp's "Export chat" feature (includes media), not the Google Drive cloud backup (which is encrypted and excluded).
-- `_chat.txt` uses a **locale-dependent** date/time format (e.g. `12/31/24, 11:59 PM - Name: message` on EN, different separators/order on other locales). Robust, locale-tolerant parsing is the central hard problem.
-- Media files are named in the txt (e.g. `IMG-20240101-WA0001.jpg`) but stored in sibling folders; the parser must reconcile references to files.
+- Input is the WhatsApp "Export chat" ZIP (`_chat.txt` + media), not the Google Drive encrypted backup.
+- `_chat.txt` uses a locale-dependent date/time format; robust, locale-tolerant parsing is the central hard problem (solved in v1.0 with day/month majority vote + 12h/24h detection).
+- Media files are named in the txt but stored in sibling folders; reconciled by basename (case-insensitive, ignoring `(1)` and dash/space variance).
 - The parsing core is deliberately isolated so the future web version can import it directly.
 
 ## Constraints
 
-- **Tech stack**: TypeScript / Node (CLI run via node or npx) — chosen so the core is reusable in the future web frontend.
+- **Tech stack**: TypeScript / Node (ESM) — chosen so the core is reusable in the future web frontend.
 - **Performance**: Must stream-parse to stay memory-safe on large chats (videos, long histories).
 - **Portability**: Output folder must open standalone in any browser with no server.
 
@@ -60,11 +74,13 @@ conversation.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| TypeScript/Node for v1 | Reuse same core in future web version | — Pending |
-| Three outputs (MD+HTML+JSON) | Covers viewing, editing, and structured reuse | — Pending |
-| Media folder-referenced by default | Portable, avoids huge single files | — Pending |
-| WhatsApp-like HTML | Familiar, "fully visualizable" goal | — Pending |
-| CLI first, web later | CLI solves personal need now; web scales to others | — Pending |
+| TypeScript/Node for v1 | Reuse same core in future web version | ✓ Good |
+| Three outputs (MD+HTML+JSON) | Covers viewing, editing, and structured reuse | ✓ Good |
+| Media folder-referenced by default | Portable, avoids huge single files | ✓ Good |
+| WhatsApp-like HTML | Familiar, "fully visualizable" goal | ✓ Good |
+| CLI first, web later | CLI solves personal need now; web scales to others | ✓ Good |
+| Media reconciliation via ZIP central directory + random-access inflate | fflate streaming inflate breaks on data-descriptor members (nested `.zip` attachment) | ✓ Good (deviation from planned fflate streaming) |
+| URL title enrichment with `--no-fetch-titles` opt-out | Local-only by default; titles optional, network-off capable | ✓ Good |
 
 ---
-*Last updated: 2026-08-21 after initialization*
+*Last updated: 2026-08-24 after v1.0 milestone*

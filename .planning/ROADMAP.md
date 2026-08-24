@@ -28,6 +28,8 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
 **Goal**: Duplicate media bytes are stored only once on disk (saving space) while the export still opens standalone and renders every message's media — with no full-file buffering even for large videos.
 **Depends on**: Phase 3 (existing `reconcileMedia`/`extractEntry` in `src/media.ts`)
 **Requirements**: MEDIA-05, MEDIA-06
+**Plans**: 1 plan
+- [ ] 04-PLAN.md — Streaming SHA-256 hash in extractEntry + content-addressed store (media/<sha256[:16]>.<ext>), skip-if-exists dedup, in-run relPath bridge (renderers untouched)
 **Success Criteria** (what must be TRUE):
   1. Running the tool on an export containing byte-identical media yields fewer files in `media/` than the number of distinct message-media refs, and no duplicate bytes exist on disk (verifiable by deduplicating refs that point at the same file).
   2. Each stored media file is named `media/<sha256[:16]>.<ext>` (extension preserved from the zip entry) so `mimeFromExt` and the browser still resolve/display it.
@@ -61,7 +63,7 @@ Full phase detail archived in `milestones/v1.0-ROADMAP.md`.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. Streaming Hash & Content-Addressed Store | 0/TBD | Not started | - |
+| 4. Streaming Hash & Content-Addressed Store | 0/1 | Not started | - |
 | 5. Manifest Bridge & Deterministic Canonical Selection | 0/TBD | Not started | - |
 | 6. Savings Report, `--no-dedupe`, & Tests | 0/TBD | Not started | - |
 
